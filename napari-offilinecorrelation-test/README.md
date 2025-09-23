@@ -80,7 +80,7 @@ If the plugin runs properly, you will see a window below
 ### 9. Run Plugins --> Offline Correlation Test/Load FLM image with registration points
 If the plugin runs properly, you will see a window below
 ![napari image when Add random image runs properly](../pictures/image2.png)
-Use the ![FLM image](../data/X7Y6_FLM_RGB_2.tif) and registration points ![FLM registration points](../data/Item2_X7Y6_FLM_RegSpread9.csv)
+Use the [FLM image](../data/X7Y6_FLM_RGB_2.tif) and registration points [FLM registration points](../data/Item2_X7Y6_FLM_RegSpread9.csv)
 
 ### 10. Modify the _widget.py and napari.yaml files and restart napari
 
