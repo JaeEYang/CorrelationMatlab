@@ -1,1 +1,96 @@
-[?1049h[1;35r[1;1H[J[7m  UW PICO 5.09                                           New Buffer                                              [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help       [7m^[27m[7mO[27m WriteOut       [7m^[27m[7mR[27m Read File      [7m^[27m[7mY[27m Prev Pg        [7m^[27m[7mK[27m Cut Text       [7m^[27m[7mC[27m Cur Pos        [K[35;1H[7m^[27m[7mX[27m Exit           [7m^[27m[7mJ[27m Justify        [7m^[27m[7mW[27m Where is       [7m^[27m[7mV[27m Next Pg        [7m^[27m[7mU[27m UnCut Text     [7m^[27m[7mT[27m To Spell       [K[3;1H[33;1H                                                                                                                 [33;51H[7m[ New file ][27m[1;1H[J[7m  UW PICO 5.09                           File: # Napari Setup and Plugin Development                             [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help       [7m^[27m[7mO[27m WriteOut       [7m^[27m[7mR[27m Read File      [7m^[27m[7mY[27m Prev Pg        [7m^[27m[7mK[27m Cut Text       [7m^[27m[7mC[27m Cur Pos        [K[35;1H[7m^[27m[7mX[27m Exit           [7m^[27m[7mJ[27m Justify        [7m^[27m[7mW[27m Where is       [7m^[27m[7mV[27m Next Pg        [7m^[27m[7mU[27m UnCut Text     [7m^[27m[7mT[27m To Spell       [K[3;1H[1;1H[J[7m  UW PICO 5.09                                File: # Napari Setup and Plugin Development                                  [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help         [7m^[27m[7mO[27m WriteOut         [7m^[27m[7mR[27m Read File        [7m^[27m[7mY[27m Prev Pg          [7m^[27m[7mK[27m Cut Text         [7m^[27m[7mC[27m Cur Pos          [K[35;1H[7m^[27m[7mX[27m Exit             [7m^[27m[7mJ[27m Justify          [7m^[27m[7mW[27m Where is         [7m^[27m[7mV[27m Next Pg          [7m^[27m[7mU[27m UnCut Text       [7m^[27m[7mT[27m To Spell         [K[3;1H[1;1H[J[7m  UW PICO 5.09                                    File: # Napari Setup and Plugin Development                                      [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help          [7m^[27m[7mO[27m WriteOut          [7m^[27m[7mR[27m Read File         [7m^[27m[7mY[27m Prev Pg           [7m^[27m[7mK[27m Cut Text          [7m^[27m[7mC[27m Cur Pos           [K[35;1H[7m^[27m[7mX[27m Exit              [7m^[27m[7mJ[27m Justify           [7m^[27m[7mW[27m Where is          [7m^[27m[7mV[27m Next Pg           [7m^[27m[7mU[27m UnCut Text        [7m^[27m[7mT[27m To Spell          [K[3;1H[1;1H[J[7m  UW PICO 5.09                                        File: # Napari Setup and Plugin Development                                          [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help            [7m^[27m[7mO[27m WriteOut            [7m^[27m[7mR[27m Read File           [7m^[27m[7mY[27m Prev Pg             [7m^[27m[7mK[27m Cut Text            [7m^[27m[7mC[27m Cur Pos             [K[35;1H[7m^[27m[7mX[27m Exit                [7m^[27m[7mJ[27m Justify             [7m^[27m[7mW[27m Where is            [7m^[27m[7mV[27m Next Pg             [7m^[27m[7mU[27m UnCut Text          [7m^[27m[7mT[27m To Spell            [K[3;1H[1;1H[J[7m  UW PICO 5.09                                           File: # Napari Setup and Plugin Development                                             [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help             [7m^[27m[7mO[27m WriteOut             [7m^[27m[7mR[27m Read File            [7m^[27m[7mY[27m Prev Pg              [7m^[27m[7mK[27m Cut Text             [7m^[27m[7mC[27m Cur Pos              [K[35;1H[7m^[27m[7mX[27m Exit                 [7m^[27m[7mJ[27m Justify              [7m^[27m[7mW[27m Where is             [7m^[27m[7mV[27m Next Pg              [7m^[27m[7mU[27m UnCut Text           [7m^[27m[7mT[27m To Spell             [K[3;1H[1;1H[J[7m  UW PICO 5.09                                             File: # Napari Setup and Plugin Development                                               [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help             [7m^[27m[7mO[27m WriteOut             [7m^[27m[7mR[27m Read File            [7m^[27m[7mY[27m Prev Pg              [7m^[27m[7mK[27m Cut Text             [7m^[27m[7mC[27m Cur Pos              [K[35;1H[7m^[27m[7mX[27m Exit                 [7m^[27m[7mJ[27m Justify              [7m^[27m[7mW[27m Where is             [7m^[27m[7mV[27m Next Pg              [7m^[27m[7mU[27m UnCut Text           [7m^[27m[7mT[27m To Spell             [K[3;1H[1;1H[J[7m  UW PICO 5.09                                              File: # Napari Setup and Plugin Development                                                [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help              [7m^[27m[7mO[27m WriteOut              [7m^[27m[7mR[27m Read File             [7m^[27m[7mY[27m Prev Pg               [7m^[27m[7mK[27m Cut Text              [7m^[27m[7mC[27m Cur Pos               [K[35;1H[7m^[27m[7mX[27m Exit                  [7m^[27m[7mJ[27m Justify               [7m^[27m[7mW[27m Where is              [7m^[27m[7mV[27m Next Pg               [7m^[27m[7mU[27m UnCut Text            [7m^[27m[7mT[27m To Spell              [K[3;1H[1;1H[J[7m  UW PICO 5.09                                              File: # Napari Setup and Plugin Development                                                 [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help              [7m^[27m[7mO[27m WriteOut              [7m^[27m[7mR[27m Read File             [7m^[27m[7mY[27m Prev Pg               [7m^[27m[7mK[27m Cut Text              [7m^[27m[7mC[27m Cur Pos               [K[35;1H[7m^[27m[7mX[27m Exit                  [7m^[27m[7mJ[27m Justify               [7m^[27m[7mW[27m Where is              [7m^[27m[7mV[27m Next Pg               [7m^[27m[7mU[27m UnCut Text            [7m^[27m[7mT[27m To Spell              [K[3;1H[1;1H[J[7m  UW PICO 5.09                                               File: # Napari Setup and Plugin Development                                                 [27m[34;1H[K[35;1H[K[34;1H[7m^[27m[7mG[27m Get Help              [7m^[27m[7mO[27m WriteOut              [7m^[27m[7mR[27m Read File             [7m^[27m[7mY[27m Prev Pg               [7m^[27m[7mK[27m Cut Text              [7m^[27m[7mC[27m Cur Pos               [K[35;1H[7m^[27m[7mX[27m Exit                  [7m^[27m[7mJ[27m Justify               [7m^[27m[7mW[27m Where is              [7m^[27m[7mV[27m Next Pg               [7m^[27m[7mU[27m UnCut Text            [7m^[27m[7mT[27m To Spell              [K[3;1H[33;1H                                                                                                                                                         [33;54H[7m[ line 1 of 1 (100%), character 0 of 0 (0%) ][27m[3;1H[34;1H[K[35;1H[K[?1049l
+## Environment Setup for napari and plugin testing
+
+### 1. Python and Conda setup
+- Use **Python 3.11** (Napari ≥0.6 requires Python ≥3.10).
+- Install **Miniforge** or **Miniconda** if not already present.
+- Install **VS Code** (you can run napari from its terminal window)
+
+### 2. Create a napari environment 
+
+```bash
+conda create -n napari-py311 python=3.11
+conda activate napari-py311
+```
+### 3. Install required packages
+
+```bash
+pip install "napari[all]==0.6.4"
+pip install numpy scipy skikit-image matplotlib
+pip install magicgui npe2 qtpy
+pip install PyQt6
+```
+### 4. Check versions after installation
+
+```bash
+pip show napari magicgui npe2 qtpy"
+```
+Expected outcomes:
+```
+Name: napari
+Version: 0.6.4
+Name: magicgui
+Version: 0.10.1
+Name: npe2
+Version: 0.7.9
+Name: QtPy
+Version: 2.4.3
+```
+```bash
+napari --info"
+```
+```
+napari: 0.6.4
+ Plugins:
+  - napari
+  - napari-console
+  - napari-svg
+```
+### 5. Clone and install the napari-offlinecorrelation-test plugin
+
+```bash
+git clone https://github.com/JaeEYang/CorrelationMatlab.git
+```
+Load the napari-offlinecorrelation-test folder in VS Code to initiate a proper tree structure
+
+### 6. Install the plugin 
+
+```bash
+pip install -e .
+```
+### 7. Verify installation of the plugin
+
+```bash
+npe2 list
+```
+Expected outcomes:
+```
+ offlinecorr    │ 0.0.0   │ ✅   │ commands (1), widgets (1) 
+```
+### 8. Launch napari and verify plugin
+- Make sure you are in the **napari-py311** environment
+```bash
+napari
+```
+The napari window will pop up.  Under Plugins, the **Offline Correlation Test** should show up
+
+### 9. Run Plugins --> Offline Correlation Test/Add random image --> Add random image
+If the plugin runs properly, you will see a window below
+![napari image when Add random image runs properly](pictures/image1.png)
+
+### 9. Run Plugins --> Offline Correlation Test/Load FLM image with registration points
+If the plugin runs properly, you will see a window below
+![napari image when Add random image runs properly](pictures/image2.png)
+Use the ![FLM image](../data/image1.tif) and registration points ![FLM registration points](../data/points.csv)
+
+### 10. Modify the _widget.py and napari.yaml files and restart napari
+
+- If you want to add more functions to the plugin, edit the _widget.py and napari.yaml files based on the![instructions](https://napari.org/stable/plugins/building_a_plugin/index.html#how-to-build-a-plugin)
+- In VS Code, in the workspace folder **NAPARI-OFFLINECORRELATION-TEST**
+  ```bash
+  rm -rf src/offlinecorr.egg-info
+  pip uninstall -y offlinecorr
+  pip install -e .
+  npe2 list
+  napari
+  ```
+  
