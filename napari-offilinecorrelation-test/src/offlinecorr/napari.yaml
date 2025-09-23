@@ -1,0 +1,18 @@
+name: offlinecorr
+display_name: Offline Correlation Test
+contributions:
+  commands:
+    - id: offlinecorr.random_image_widget
+      title: Random Image Widget
+      python_name: offlinecorr._widget:random_image_widget
+    - id: offlinecorr.load_flm_with_points
+      title: Load FLM image with registration points
+      python_name: offlinecorr._widget:load_flm_with_points
+
+  widgets:
+    - command: offlinecorr.random_image_widget
+      display_name: Random Image Widget
+    - command: offlinecorr.load_flm_with_points
+      display_name: Load FLM image with registration points
+
+
