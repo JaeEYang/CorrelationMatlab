@@ -84,7 +84,7 @@ Use the ![FLM image](../data/X7Y6_FLM_RGB_2.tif) and registration points ![FLM r
 
 ### 10. Modify the _widget.py and napari.yaml files and restart napari
 
-- If you want to add more functions to the plugin, edit the _widget.py and napari.yaml files based on the![instructions](https://napari.org/stable/plugins/building_a_plugin/index.html#how-to-build-a-plugin)
+- If you want to add more functions to the plugin, edit the _widget.py and napari.yaml files based on the [instructions](https://napari.org/stable/plugins/building_a_plugin/index.html#how-to-build-a-plugin).
 - In VS Code, in the workspace folder **NAPARI-OFFLINECORRELATION-TEST**
   ```bash
   rm -rf src/offlinecorr.egg-info
@@ -93,4 +93,4 @@ Use the ![FLM image](../data/X7Y6_FLM_RGB_2.tif) and registration points ![FLM r
   npe2 list
   napari
   ```
-  
+- If the plugin shows under the **Plugins** menu tab, the plugins have been recognized. 
