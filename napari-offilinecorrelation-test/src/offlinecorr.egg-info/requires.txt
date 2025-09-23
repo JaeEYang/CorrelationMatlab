@@ -1,0 +1,3 @@
+napari
+numpy
+scikit-image
