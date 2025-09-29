@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+src/correlation2d3d/__init__.py
+src/correlation2d3d/_widget.py
+src/correlation2d3d/napari.yaml
+src/correlation2d3d/offline_widgets.py
+src/correlation_2d_3d.egg-info/PKG-INFO
+src/correlation_2d_3d.egg-info/SOURCES.txt
+src/correlation_2d_3d.egg-info/dependency_links.txt
+src/correlation_2d_3d.egg-info/entry_points.txt
+src/correlation_2d_3d.egg-info/requires.txt
+src/correlation_2d_3d.egg-info/top_level.txt

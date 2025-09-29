@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: correlation-2d-3d
+Version: 0.1.0
+Summary: Napari plugin for Correlation 2D-3D: Offline Correlation and SerialEM Integration
+Author-email: Your Name <you@example.com>
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: napari
+Requires-Dist: numpy
+Requires-Dist: scikit-image
+Requires-Dist: mrcfile
+
 ## Environment Setup for napari and plugin testing
 
 ### 1. Python and Conda setup
