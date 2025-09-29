@@ -1,0 +1,2 @@
+[napari.manifest]
+correlation-2d-3d = correlation2d3d:napari.yaml

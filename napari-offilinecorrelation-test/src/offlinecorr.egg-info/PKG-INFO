@@ -6,3 +6,4 @@ Author-email: Your Name <you@example.com>
 Requires-Dist: napari
 Requires-Dist: numpy
 Requires-Dist: scikit-image
+Requires-Dist: mrcfile
