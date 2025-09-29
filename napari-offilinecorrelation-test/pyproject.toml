@@ -1,19 +1,28 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "offlinecorr"
-version = "0.0.0"
-description = "Test plugin for FLM image + registration points"
-authors = [{ name = "Your Name", email = "you@example.com" }]
-dependencies = ["napari", "numpy", "scikit-image"]
+name = "correlation-2d-3d"
+version = "0.1.0"
+description = "Napari plugin for Correlation 2D-3D: Offline Correlation and SerialEM Integration"
+authors = [
+  { name = "Your Name", email = "you@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "napari",
+  "numpy",
+  "scikit-image",
+  "mrcfile"
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"offlinecorr" = ["napari.yaml"]
+"correlation2d3d" = ["napari.yaml"]
 
 [project.entry-points."napari.manifest"]
-offlinecorr = "offlinecorr:napari.yaml"
+correlation-2d-3d = "correlation2d3d:napari.yaml"

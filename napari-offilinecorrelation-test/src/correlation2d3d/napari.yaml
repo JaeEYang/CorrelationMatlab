@@ -1,0 +1,18 @@
+name: correlation-2d-3d
+display_name: Correlation 2D-3D
+version: 0.1.0
+
+contributions:
+  commands:
+    - id: correlation-2d-3d.offline
+      title: Offline Correlation
+      python_name: correlation2d3d._widget:offline_correlation_widget
+    - id: correlation-2d-3d.serialem
+      title: SerialEM Integration
+      python_name: correlation2d3d._widget:serialem_integration_widget
+
+  widgets:
+    - command: correlation-2d-3d.offline
+      display_name: Offline Correlation
+    - command: correlation-2d-3d.serialem
+      display_name: SerialEM Integration
