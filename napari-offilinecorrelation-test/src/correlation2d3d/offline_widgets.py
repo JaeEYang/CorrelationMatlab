@@ -167,9 +167,8 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         else:
             H, W = img_shape
         new_pts = np.zeros_like(points)
-        # Ajustado para coincidir con np.rot90 (antihorario)
-        new_pts[:, 0] = W - 1 - points[:, 1]  # nuevo X = W-1 - Y
-        new_pts[:, 1] = points[:, 0]  # nuevo Y = X
+        new_pts[:, 0] = W - 1 - points[:, 1]
+        new_pts[:, 1] = points[:, 0]
         return new_pts
 
     def flip_vertical(points, img_shape):
@@ -179,7 +178,7 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         else:
             H, W = img_shape
         new_pts = points.copy()
-        new_pts[:, 0] = W - 1 - points[:, 0]  # flip en X
+        new_pts[:, 0] = W - 1 - points[:, 0]  # flip X axis
         return new_pts
 
     def flip_horizontal(points, img_shape):
@@ -189,7 +188,7 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         else:
             H, W = img_shape
         new_pts = points.copy()
-        new_pts[:, 1] = H - 1 - points[:, 1]  # flip en Y
+        new_pts[:, 1] = H - 1 - points[:, 1]  # flip Y axis
         return new_pts
 
     # Apply transform to image + linked points
