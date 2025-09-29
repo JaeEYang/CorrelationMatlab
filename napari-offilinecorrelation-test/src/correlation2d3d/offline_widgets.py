@@ -13,42 +13,60 @@ assigned_points = {"Image 1": None, "Image 2": None}
 # ---------------------------
 # NAV parsing + reconstruction
 # ---------------------------
-def parse_nav(nav_path: Path):
+def parse_nav(nav_path):
     """Parse SerialEM .nav file for montage maps and points."""
+
+    # Normalize input to Path
+    try:
+        nav_path = Path(nav_path)
+    except Exception:
+        print(f"Invalid nav_path: {nav_path}")
+        return {}, []
+
+    # Check existence
+    if not nav_path.exists():
+        print(f"NAV file does not exist: {nav_path}")
+        return {}, []
+
     maps = {}
     points = []
     current_map = None
     map_id = None
 
-    with open(nav_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line == "Map":
-                current_map = {}
-                map_id = None
-            elif line.startswith("MapID"):
-                map_id = int(line.split("=")[1].strip())
-                maps[map_id] = current_map
-            elif line.startswith("ImageFile"):
-                if current_map is not None:
-                    current_map["file"] = line.split("=")[1].strip()
-            elif line.startswith("PieceCoordinates"):
-                coords = line.split("=")[1].strip().split()
-                if current_map is not None:
-                    if "coords" not in current_map:
-                        current_map["coords"] = []
-                    current_map["coords"].append((int(coords[0]), int(coords[1])))
-            elif line.startswith("Point"):
-                points.append({})
-            elif line.startswith("StageX") and points:
-                points[-1]["x"] = float(line.split("=")[1].strip())
-            elif line.startswith("StageY") and points:
-                points[-1]["y"] = float(line.split("=")[1].strip())
-            elif line.startswith("StageZ") and points:
-                points[-1]["z"] = float(line.split("=")[1].strip())
+    try:
+        with open(nav_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line == "Map":
+                    current_map = {}
+                    map_id = None
+                elif line.startswith("MapID"):
+                    map_id = int(line.split("=")[1].strip())
+                    maps[map_id] = current_map
+                elif line.startswith("ImageFile"):
+                    if current_map is not None:
+                        current_map["file"] = line.split("=")[1].strip()
+                elif line.startswith("PieceCoordinates"):
+                    coords = line.split("=")[1].strip().split()
+                    if current_map is not None:
+                        if "coords" not in current_map:
+                            current_map["coords"] = []
+                        current_map["coords"].append((int(coords[0]), int(coords[1])))
+                elif line.startswith("Point"):
+                    points.append({})
+                elif line.startswith("StageX") and points:
+                    points[-1]["x"] = float(line.split("=")[1].strip())
+                elif line.startswith("StageY") and points:
+                    points[-1]["y"] = float(line.split("=")[1].strip())
+                elif line.startswith("StageZ") and points:
+                    points[-1]["z"] = float(line.split("=")[1].strip())
+    except Exception as e:
+        print(f"❌ Failed to parse NAV file {nav_path}: {e}")
+        return {}, []
 
     return maps, points
-
 
 def reconstruct_from_nav(mrc_path: Path, coords):
     """Reconstruct montage image from tile stack + piece coordinates."""
