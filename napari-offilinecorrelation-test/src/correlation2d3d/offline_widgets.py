@@ -15,15 +15,12 @@ assigned_points = {"Image 1": None, "Image 2": None}
 # ---------------------------
 def parse_nav(nav_path):
     """Parse SerialEM .nav file for montage maps and points."""
-
-    # Normalize input to Path
     try:
         nav_path = Path(nav_path)
     except Exception:
         print(f"Invalid nav_path: {nav_path}")
         return {}, []
 
-    # Check existence
     if not nav_path.exists():
         print(f"NAV file does not exist: {nav_path}")
         return {}, []
@@ -31,7 +28,6 @@ def parse_nav(nav_path):
     maps = {}
     points = []
     current_map = None
-    map_id = None
 
     try:
         with open(nav_path, "r") as f:
@@ -39,15 +35,19 @@ def parse_nav(nav_path):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
-                if line == "Map":
+
+                if line.startswith("[Item"):
+                    # Start of a new item, could be a map or points
                     current_map = {}
-                    map_id = None
                 elif line.startswith("MapID"):
-                    map_id = int(line.split("=")[1].strip())
-                    maps[map_id] = current_map
-                elif line.startswith("ImageFile"):
                     if current_map is not None:
-                        current_map["file"] = line.split("=")[1].strip()
+                        map_id = int(line.split("=")[1].strip())
+                        maps[map_id] = current_map
+                elif line.startswith("MapFile"):
+                    if current_map is not None:
+                        # Extract the filename from the full path
+                        full_path = line.split("=")[1].strip()
+                        current_map["file"] = Path(full_path).name
                 elif line.startswith("PieceCoordinates"):
                     coords = line.split("=")[1].strip().split()
                     if current_map is not None:
@@ -63,9 +63,11 @@ def parse_nav(nav_path):
                 elif line.startswith("StageZ") and points:
                     points[-1]["z"] = float(line.split("=")[1].strip())
     except Exception as e:
-        print(f"❌ Failed to parse NAV file {nav_path}: {e}")
+        print(f"Error: Failed to parse NAV file {nav_path}: {e}")
         return {}, []
 
+    # Filter out any maps that don't have file information
+    maps = {k: v for k, v in maps.items() if "file" in v and "coords" in v}
     return maps, points
 
 def reconstruct_from_nav(mrc_path: Path, coords):
@@ -95,48 +97,10 @@ def reconstruct_from_nav(mrc_path: Path, coords):
 
 
 # ---------------------------
-# Load Images Widget
-# ---------------------------
-def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
-    mrc_edit = FileEdit(label="", mode="r", filter="*.mrc *.tif *.tiff *.png *.jpg")
-    nav_edit = FileEdit(label="", mode="r", filter="*.nav")
-    button = PushButton(text="Load Images")
-
-    def _on_click(event=None):
-        mrc_path = mrc_edit.value
-        nav_path = nav_edit.value
-
-        if not mrc_path or not Path(mrc_path).exists():
-            print("❌ Please select an MRC or image file")
-            return
-
-        # Load MRC or normal image
-        if Path(mrc_path).suffix.lower() == ".mrc":
-            with mrcfile.open(str(mrc_path), permissive=True) as mrc:
-                data = np.copy(mrc.data)
-            viewer.add_image(data, name=Path(mrc_path).stem, colormap="gray")
-        else:
-            img = io.imread(str(mrc_path))
-            viewer.add_image(img, name=Path(mrc_path).stem)
-
-        # If nav present, try montage maps
-        if nav_path and Path(nav_path).exists():
-            maps, _ = parse_nav(nav_path)
-            for mid, info in maps.items():
-                mrc_file = Path(nav_path).parent / info["file"]
-                if not mrc_file.exists():
-                    continue
-                montage = reconstruct_from_nav(mrc_file, info["coords"])
-                viewer.add_image(montage, name=f"Montage Map {mid}", colormap="gray")
-
-    button.clicked.connect(_on_click)
-    return Container(widgets=[mrc_edit, nav_edit, button])
-
-
-# ---------------------------
 # Image Panel (Image 1 / 2)
 # ---------------------------
 def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> Container:
+    # Common widgets
     combo = ComboBox(label=f"Select {name}", choices=[])
     label = Label(value=f"{name}: None")
     clear_btn = PushButton(text="Clear")
@@ -145,11 +109,90 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
     fliph_btn = PushButton(text="Flip H")
     new_pts_btn = PushButton(text="New Points Layer")
 
+    # Container for all widgets
+    all_widgets = [Label(value=f"<h3>{name}</h3>")]
+
+    # Add specific loader based on panel name
+    if name == "Image 1":
+        image_file_edit = FileEdit(label="", mode="r", filter="*.mrc *.tif *.tiff *.png *.jpg")
+        load_image_button = PushButton(text="Load Image File")
+
+        def _on_load_image_click():
+            image_path = image_file_edit.value
+            if not image_path or not Path(image_path).exists():
+                print("Error: Please select an image file to load.")
+                return
+            try:
+                if Path(image_path).suffix.lower() == ".mrc":
+                    with mrcfile.open(str(image_path), permissive=True) as mrc:
+                        data = np.copy(mrc.data)
+                    layer = viewer.add_image(data, name=Path(image_path).stem, colormap="gray")
+                else:
+                    img = io.imread(str(image_path))
+                    layer = viewer.add_image(img, name=Path(image_path).stem)
+                
+                # Manually refresh choices before setting the value
+                refresh_choices()
+
+                # Auto-assign the loaded image
+                combo.value = layer.name
+                assigned_images[name] = layer
+                label.value = f"{name}: {layer.name}"
+
+            except Exception as e:
+                print(f"Error loading image {Path(image_path).name}: {e}")
+
+        load_image_button.clicked.connect(_on_load_image_click)
+        all_widgets.extend([image_file_edit, load_image_button])
+
+    elif name == "Image 2":
+        nav_file_edit = FileEdit(label="", mode="r", filter="*.nav")
+        load_nav_button = PushButton(text="Load NAV Montage")
+
+        def _on_load_nav_click():
+            nav_path = nav_file_edit.value
+            if not nav_path or not Path(nav_path).exists():
+                print("Error: Please select a .nav file to load.")
+                return
+
+            maps, _ = parse_nav(nav_path)
+            if not maps:
+                print(f"Info: No maps found in {Path(nav_path).name}.")
+                return
+
+            for map_id, info in maps.items():
+                if not info or "file" not in info:
+                    print(f"Warning: Skipping map {map_id} due to missing file info.")
+                    continue
+                mrc_path = Path(nav_path).parent / info["file"]
+                if not mrc_path.exists():
+                    print(f"Warning: MRC file for map {map_id} not found at: {mrc_path}")
+                    continue
+                try:
+                    montage = reconstruct_from_nav(mrc_path, info["coords"])
+                    viewer.add_image(montage, name=f"Montage Map {map_id}", colormap="gray")
+                except Exception as e:
+                    print(f"Error: Failed to reconstruct montage for map {map_id}: {e}")
+
+        load_nav_button.clicked.connect(_on_load_nav_click)
+        all_widgets.extend([nav_file_edit, load_nav_button])
+
+
+    # Add common widgets
+    all_widgets.extend([combo, label, clear_btn,
+                        rotate_btn, flipv_btn, fliph_btn,
+                        new_pts_btn])
+
     def refresh_choices(event=None):
-        combo.choices = [layer.name for layer in viewer.layers if isinstance(layer, Image)]
+        current_choice = combo.value
+        choices = [layer.name for layer in viewer.layers if isinstance(layer, Image)]
+        combo.choices = choices
+        if current_choice in choices:
+            combo.value = current_choice
 
     viewer.layers.events.inserted.connect(refresh_choices)
     viewer.layers.events.removed.connect(refresh_choices)
+    refresh_choices() # Initial population
 
     def on_select(event=None):
         if combo.value:
@@ -160,6 +203,7 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         assigned_images[name] = None
         assigned_points[name] = None
         label.value = f"{name}: None"
+        combo.value = None
 
     def transform_image(fn):
         layer = assigned_images.get(name)
@@ -201,9 +245,7 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
     combo.changed.connect(on_select)
     clear_btn.clicked.connect(on_clear)
 
-    return Container(widgets=[combo, label, clear_btn,
-                              rotate_btn, flipv_btn, fliph_btn,
-                              new_pts_btn])
+    return Container(widgets=all_widgets)
 
 
 # ---------------------------
@@ -233,4 +275,4 @@ def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
             assigned_points[combo.value] = layer
 
     button.clicked.connect(_on_click)
-    return Container(widgets=[file_edit, combo, button])
+    return Container(widgets=[Label(value="<h3>Load Points</h3>"), file_edit, combo, button])
