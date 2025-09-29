@@ -162,25 +162,37 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
 
     # ---- Transform helpers ----
     def rotate_points_90ccw(points, img_shape):
-        H, W = img_shape
+        if len(img_shape) > 2:  # RGB
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
         new_pts = np.zeros_like(points)
-        new_pts[:, 0] = H - points[:, 1]
-        new_pts[:, 1] = points[:, 0]
+        # Ajustado para coincidir con np.rot90 (antihorario)
+        new_pts[:, 0] = W - 1 - points[:, 1]  # nuevo X = W-1 - Y
+        new_pts[:, 1] = points[:, 0]  # nuevo Y = X
         return new_pts
 
     def flip_vertical(points, img_shape):
-        H, _ = img_shape
+        """Vertical flip"""
+        if len(img_shape) > 2:
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
         new_pts = points.copy()
-        new_pts[:, 1] = H - points[:, 1]
+        new_pts[:, 0] = W - 1 - points[:, 0]  # flip en X
         return new_pts
 
     def flip_horizontal(points, img_shape):
-        _, W = img_shape
+        """Horizontal flip"""
+        if len(img_shape) > 2:
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
         new_pts = points.copy()
-        new_pts[:, 0] = W - points[:, 0]
+        new_pts[:, 1] = H - 1 - points[:, 1]  # flip en Y
         return new_pts
 
-    # Generic transform
+    # Apply transform to image + linked points
     def transform_image(img_fn, pts_fn=None):
         layer = assigned_images.get(name)
         if layer is None:
@@ -195,11 +207,16 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
     # ---- Button connections ----
     combo.changed.connect(on_select)
     clear_btn.clicked.connect(on_clear)
+
     rotate_btn.clicked.connect(
         lambda e: transform_image(lambda d: np.rot90(d, k=1), rotate_points_90ccw)
     )
-    flipv_btn.clicked.connect(lambda e: transform_image(np.flipud, flip_vertical))
-    fliph_btn.clicked.connect(lambda e: transform_image(np.fliplr, flip_horizontal))
+    flipv_btn.clicked.connect(
+        lambda e: transform_image(np.flipud, flip_vertical)
+    )
+    fliph_btn.clicked.connect(
+        lambda e: transform_image(np.fliplr, flip_horizontal)
+    )
 
     def on_new_points(event=None):
         layer = viewer.add_points(
@@ -217,7 +234,6 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         rotate_btn, flipv_btn, fliph_btn,
         new_pts_btn
     ])
-
 # ---------------------------
 # Load Points Widget
 # ---------------------------
