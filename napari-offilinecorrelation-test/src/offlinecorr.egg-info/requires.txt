@@ -1,4 +1,0 @@
-napari
-numpy
-scikit-image
-mrcfile

@@ -27,7 +27,7 @@ conda activate napari-py311
 
 ```bash
 pip install "napari[all]==0.6.4"
-pip install numpy scipy skikit-image matplotlib
+pip install numpy scipy scikit-image matplotlib
 pip install magicgui npe2 qtpy
 pip install PyQt6
 ```
