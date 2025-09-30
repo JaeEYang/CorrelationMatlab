@@ -1,8 +1,9 @@
 import numpy as np
 from pathlib import Path
-from magicgui.widgets import FileEdit, PushButton, ComboBox, Container, Label
+from magicgui.widgets import FileEdit, PushButton, ComboBox, Container, Label, FloatSlider
 import mrcfile
 from skimage import io
+from napari.utils.transforms import Affine
 from napari.layers import Image
 
 # Global state: linked images and points
@@ -104,7 +105,7 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
     combo = ComboBox(label=f"Select {name}", choices=[])
     label = Label(value=f"{name}: None")
     clear_btn = PushButton(text="Clear")
-    rotate_btn = PushButton(text="Rotate 90°")
+    rotate_slider = FloatSlider(min=-180, max=180, value=0, label="Rotate (°)")
     flipv_btn = PushButton(text="Flip V")
     fliph_btn = PushButton(text="Flip H")
     new_pts_btn = PushButton(text="New Points Layer")
@@ -112,75 +113,42 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
     # Container for all widgets
     all_widgets = [Label(value=f"<h3>{name}</h3>")]
 
-    # Add specific loader based on panel name
-    if name == "Image 1":
-        image_file_edit = FileEdit(label="", mode="r", filter="*.mrc *.tif *.tiff *.png *.jpg")
-        load_image_button = PushButton(text="Load Image File")
+    # Add a standard image loader to the panel
+    image_file_edit = FileEdit(label="", mode="r", filter="*.mrc *.tif *.tiff *.png *.jpg")
+    load_image_button = PushButton(text="Load Image File")
 
-        def _on_load_image_click():
-            image_path = image_file_edit.value
-            if not image_path or not Path(image_path).exists():
-                print("Error: Please select an image file to load.")
-                return
-            try:
-                if Path(image_path).suffix.lower() == ".mrc":
-                    with mrcfile.open(str(image_path), permissive=True) as mrc:
-                        data = np.copy(mrc.data)
-                    layer = viewer.add_image(data, name=Path(image_path).stem, colormap="gray")
-                else:
-                    img = io.imread(str(image_path))
-                    layer = viewer.add_image(img, name=Path(image_path).stem)
-                
-                # Manually refresh choices before setting the value
-                refresh_choices()
+    def _on_load_image_click():
+        image_path = image_file_edit.value
+        if not image_path or not Path(image_path).exists():
+            print("Error: Please select an image file to load.")
+            return
+        try:
+            if Path(image_path).suffix.lower() == ".mrc":
+                with mrcfile.open(str(image_path), permissive=True) as mrc:
+                    data = np.copy(mrc.data)
+                layer = viewer.add_image(data, name=Path(image_path).stem, colormap="gray")
+            else:
+                img = io.imread(str(image_path))
+                layer = viewer.add_image(img, name=Path(image_path).stem)
+            
+            # Manually refresh choices before setting the value
+            refresh_choices()
 
-                # Auto-assign the loaded image
-                combo.value = layer.name
-                assigned_images[name] = layer
-                label.value = f"{name}: {layer.name}"
+            # Auto-assign the loaded image
+            combo.value = layer.name
+            assigned_images[name] = layer
+            label.value = f"{name}: {layer.name}"
 
-            except Exception as e:
-                print(f"Error loading image {Path(image_path).name}: {e}")
+        except Exception as e:
+            print(f"Error loading image {Path(image_path).name}: {e}")
 
-        load_image_button.clicked.connect(_on_load_image_click)
-        all_widgets.extend([image_file_edit, load_image_button])
-
-    elif name == "Image 2":
-        nav_file_edit = FileEdit(label="", mode="r", filter="*.nav")
-        load_nav_button = PushButton(text="Load NAV Montage")
-
-        def _on_load_nav_click():
-            nav_path = nav_file_edit.value
-            if not nav_path or not Path(nav_path).exists():
-                print("Error: Please select a .nav file to load.")
-                return
-
-            maps, _ = parse_nav(nav_path)
-            if not maps:
-                print(f"Info: No maps found in {Path(nav_path).name}.")
-                return
-
-            for map_id, info in maps.items():
-                if not info or "file" not in info:
-                    print(f"Warning: Skipping map {map_id} due to missing file info.")
-                    continue
-                mrc_path = Path(nav_path).parent / info["file"]
-                if not mrc_path.exists():
-                    print(f"Warning: MRC file for map {map_id} not found at: {mrc_path}")
-                    continue
-                try:
-                    montage = reconstruct_from_nav(mrc_path, info["coords"])
-                    viewer.add_image(montage, name=f"Montage Map {map_id}", colormap="gray")
-                except Exception as e:
-                    print(f"Error: Failed to reconstruct montage for map {map_id}: {e}")
-
-        load_nav_button.clicked.connect(_on_load_nav_click)
-        all_widgets.extend([nav_file_edit, load_nav_button])
+    load_image_button.clicked.connect(_on_load_image_click)
+    all_widgets.extend([image_file_edit, load_image_button])
 
 
     # Add common widgets
     all_widgets.extend([combo, label, clear_btn,
-                        rotate_btn, flipv_btn, fliph_btn,
+                        rotate_slider, flipv_btn, fliph_btn,
                         new_pts_btn])
 
     def refresh_choices(event=None):
@@ -198,17 +166,33 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         if combo.value:
             assigned_images[name] = viewer.layers[combo.value]
             label.value = f"{name}: {combo.value}"
+            # Reset rotation on new image selection
+            rotate_slider.value = 0
+            if assigned_images[name]:
+                assigned_images[name].affine = np.eye(3)
+
 
     def on_clear(event=None):
+        # Reset affine transform on the layer before clearing
+        layer = assigned_images.get(name)
+        if layer:
+            layer.affine = np.eye(3)
+        
         assigned_images[name] = None
         assigned_points[name] = None
         label.value = f"{name}: None"
         combo.value = None
+        rotate_slider.value = 0
 
     def transform_image(fn):
         layer = assigned_images.get(name)
         if layer is None:
             return
+        
+        # Reset affine transform before applying data transform
+        layer.affine = np.eye(3)
+        rotate_slider.value = 0
+
         data = layer.data
         layer.data = fn(data)
 
@@ -216,16 +200,12 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         points_layer = assigned_points.get(name)
         if points_layer is not None:
             pts = points_layer.data.copy()
+            # For vertical flip (up-down), transform the y-coordinate (index 0)
             if fn == np.flipud:
-                pts[:, 1] = data.shape[0] - pts[:, 1]
+                pts[:, 0] = data.shape[0] - pts[:, 0]
+            # For horizontal flip (left-right), transform the x-coordinate (index 1)
             elif fn == np.fliplr:
-                pts[:, 0] = data.shape[1] - pts[:, 0]
-            elif fn.__name__ == "<lambda>":
-                W = data.shape[1]
-                new_pts = np.zeros_like(pts)
-                new_pts[:, 0] = pts[:, 1]
-                new_pts[:, 1] = W - pts[:, 0]
-                pts = new_pts
+                pts[:, 1] = data.shape[1] - pts[:, 1]
             points_layer.data = pts
 
     def on_new_points(event=None):
@@ -237,10 +217,30 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         )
         assigned_points[name] = layer
 
-    rotate_btn.clicked.connect(lambda e: transform_image(lambda d: np.rot90(d, k=1)))
+    def on_rotate(angle: float):
+        layer = assigned_images.get(name)
+        if layer is None:
+            return
+        
+        # Get image center in napari's (y, x) order
+        center = np.array(layer.data.shape[-2:]) / 2
+        
+        # Create the three transformations to compose for centered rotation
+        translate_to_origin = Affine(translate=-center)
+        rotate = Affine(rotate=angle)
+        translate_back = Affine(translate=center)
+        
+        # Compose the transforms. The last transform to be applied is first in the chain.
+        composed_transform = translate_back.compose(rotate).compose(translate_to_origin)
+        
+        # Set the affine transformation on the layer
+        layer.affine = composed_transform.affine_matrix
+
+
     flipv_btn.clicked.connect(lambda e: transform_image(np.flipud))
     fliph_btn.clicked.connect(lambda e: transform_image(np.fliplr))
     new_pts_btn.clicked.connect(on_new_points)
+    rotate_slider.changed.connect(on_rotate)
 
     combo.changed.connect(on_select)
     clear_btn.clicked.connect(on_clear)
