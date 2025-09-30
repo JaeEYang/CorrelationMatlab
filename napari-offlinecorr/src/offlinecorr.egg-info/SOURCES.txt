@@ -1,0 +1,10 @@
+pyproject.toml
+src/offlinecorr/__init__.py
+src/offlinecorr/_widget.py
+src/offlinecorr/napari.yaml
+src/offlinecorr.egg-info/PKG-INFO
+src/offlinecorr.egg-info/SOURCES.txt
+src/offlinecorr.egg-info/dependency_links.txt
+src/offlinecorr.egg-info/entry_points.txt
+src/offlinecorr.egg-info/requires.txt
+src/offlinecorr.egg-info/top_level.txt

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offlinecorr"
+version = "0.0.0"
+description = "Test plugin for FLM image + registration points"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+dependencies = ["napari", "numpy", "scikit-image"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"offlinecorr" = ["napari.yaml"]
+
+[project.entry-points."napari.manifest"]
+offlinecorr = "offlinecorr:napari.yaml"
