@@ -15,17 +15,14 @@ assigned_points = {"Image 1": None, "Image 2": None}
 # ---------------------------
 def parse_nav(nav_path):
     """Parse SerialEM .nav file for montage maps and points."""
-
-    # Normalize input to Path
     try:
         nav_path = Path(nav_path)
     except Exception:
-        print(f"Invalid nav_path: {nav_path}")
+        print(f"⚠️ Invalid nav_path: {nav_path}")
         return {}, []
 
-    # Check existence
     if not nav_path.exists():
-        print(f"NAV file does not exist: {nav_path}")
+        print(f"⚠️ NAV file does not exist: {nav_path}")
         return {}, []
 
     maps = {}
@@ -67,6 +64,7 @@ def parse_nav(nav_path):
         return {}, []
 
     return maps, points
+
 
 def reconstruct_from_nav(mrc_path: Path, coords):
     """Reconstruct montage image from tile stack + piece coordinates."""
@@ -122,12 +120,15 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
         # If nav present, try montage maps
         if nav_path and Path(nav_path).exists():
             maps, _ = parse_nav(nav_path)
-            for mid, info in maps.items():
-                mrc_file = Path(nav_path).parent / info["file"]
-                if not mrc_file.exists():
-                    continue
-                montage = reconstruct_from_nav(mrc_file, info["coords"])
-                viewer.add_image(montage, name=f"Montage Map {mid}", colormap="gray")
+            if not maps:
+                print(f"⚠️ No valid maps found in {nav_path}")
+            else:
+                for mid, info in maps.items():
+                    mrc_file = Path(nav_path).parent / info["file"]
+                    if not mrc_file.exists():
+                        continue
+                    montage = reconstruct_from_nav(mrc_file, info["coords"])
+                    viewer.add_image(montage, name=f"Montage Map {mid}", colormap="gray")
 
     button.clicked.connect(_on_click)
     return Container(widgets=[mrc_edit, nav_edit, button])
@@ -136,8 +137,11 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
 # ---------------------------
 # Image Panel (Image 1 / 2)
 # ---------------------------
-def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> Container:
-    combo = ComboBox(label=f"Select {name}", choices=[])
+def make_image_panel(viewer, name: str = "Image 1") -> Container:
+    combo = ComboBox(
+        label=f"Select {name}",
+        choices=lambda *args: [layer.name for layer in viewer.layers if isinstance(layer, Image)]
+    )
     label = Label(value=f"{name}: None")
     clear_btn = PushButton(text="Clear")
     rotate_btn = PushButton(text="Rotate 90°")
@@ -145,12 +149,7 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
     fliph_btn = PushButton(text="Flip H")
     new_pts_btn = PushButton(text="New Points Layer")
 
-    def refresh_choices(event=None):
-        combo.choices = [layer.name for layer in viewer.layers if isinstance(layer, Image)]
-
-    viewer.layers.events.inserted.connect(refresh_choices)
-    viewer.layers.events.removed.connect(refresh_choices)
-
+    # ---- Selection handling ----
     def on_select(event=None):
         if combo.value:
             assigned_images[name] = viewer.layers[combo.value]
@@ -161,28 +160,62 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         assigned_points[name] = None
         label.value = f"{name}: None"
 
-    def transform_image(fn):
+    # ---- Transform helpers ----
+    def rotate_points_90ccw(points, img_shape):
+        if len(img_shape) > 2:  # RGB
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
+        new_pts = np.zeros_like(points)
+        new_pts[:, 0] = W - 1 - points[:, 1]
+        new_pts[:, 1] = points[:, 0]
+        return new_pts
+
+    def flip_vertical(points, img_shape):
+        """Vertical flip"""
+        if len(img_shape) > 2:
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
+        new_pts = points.copy()
+        new_pts[:, 0] = W - 1 - points[:, 0]  # flip X axis
+        return new_pts
+
+    def flip_horizontal(points, img_shape):
+        """Horizontal flip"""
+        if len(img_shape) > 2:
+            H, W = img_shape[:2]
+        else:
+            H, W = img_shape
+        new_pts = points.copy()
+        new_pts[:, 1] = H - 1 - points[:, 1]  # flip Y axis
+        return new_pts
+
+    # Apply transform to image + linked points
+    def transform_image(img_fn, pts_fn=None):
         layer = assigned_images.get(name)
         if layer is None:
             return
         data = layer.data
-        layer.data = fn(data)
+        layer.data = img_fn(data)
 
-        # Apply transformation also to linked points
         points_layer = assigned_points.get(name)
-        if points_layer is not None:
-            pts = points_layer.data.copy()
-            if fn == np.flipud:
-                pts[:, 1] = data.shape[0] - pts[:, 1]
-            elif fn == np.fliplr:
-                pts[:, 0] = data.shape[1] - pts[:, 0]
-            elif fn.__name__ == "<lambda>":
-                W = data.shape[1]
-                new_pts = np.zeros_like(pts)
-                new_pts[:, 0] = pts[:, 1]
-                new_pts[:, 1] = W - pts[:, 0]
-                pts = new_pts
-            points_layer.data = pts
+        if points_layer is not None and pts_fn is not None:
+            points_layer.data = pts_fn(points_layer.data, data.shape)
+
+    # ---- Button connections ----
+    combo.changed.connect(on_select)
+    clear_btn.clicked.connect(on_clear)
+
+    rotate_btn.clicked.connect(
+        lambda e: transform_image(lambda d: np.rot90(d, k=1), rotate_points_90ccw)
+    )
+    flipv_btn.clicked.connect(
+        lambda e: transform_image(np.flipud, flip_vertical)
+    )
+    fliph_btn.clicked.connect(
+        lambda e: transform_image(np.fliplr, flip_horizontal)
+    )
 
     def on_new_points(event=None):
         layer = viewer.add_points(
@@ -193,19 +226,13 @@ def make_image_panel(viewer: "napari.viewer.Viewer", name: str = "Image 1") -> C
         )
         assigned_points[name] = layer
 
-    rotate_btn.clicked.connect(lambda e: transform_image(lambda d: np.rot90(d, k=1)))
-    flipv_btn.clicked.connect(lambda e: transform_image(np.flipud))
-    fliph_btn.clicked.connect(lambda e: transform_image(np.fliplr))
     new_pts_btn.clicked.connect(on_new_points)
 
-    combo.changed.connect(on_select)
-    clear_btn.clicked.connect(on_clear)
-
-    return Container(widgets=[combo, label, clear_btn,
-                              rotate_btn, flipv_btn, fliph_btn,
-                              new_pts_btn])
-
-
+    return Container(widgets=[
+        combo, label, clear_btn,
+        rotate_btn, flipv_btn, fliph_btn,
+        new_pts_btn
+    ])
 # ---------------------------
 # Load Points Widget
 # ---------------------------
