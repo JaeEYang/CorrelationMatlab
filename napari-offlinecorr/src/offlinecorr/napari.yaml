@@ -1,18 +1,29 @@
-name: offlinecorr
-display_name: Offline Correlation Test
+name: napari-offlinecorr
+display_name: Offline Correlation
 contributions:
   commands:
-    - id: offlinecorr.random_image_widget
-      title: Random Image Widget
-      python_name: offlinecorr._widget:random_image_widget
-    - id: offlinecorr.load_flm_with_points
-      title: Load FLM image with registration points
-      python_name: offlinecorr._widget:load_flm_with_points
-
+    # Existing commands (keep these if they exist)
+    - id: napari-offlinecorr.make_qwidget
+      python_name: offlinecorr._widget:ExampleQWidget
+      title: Make example QWidget
+    - id: napari-offlinecorr.make_magic_widget
+      python_name: offlinecorr._widget:example_magic_widget
+      title: Make example magic widget
+    
+    # NEW: Add this command for FLM-TEM correlation
+    - id: napari-offlinecorr.flm_tem_correlation
+      python_name: offlinecorr.correlation_widget:FLMTEMCorrelationWidget
+      title: FLM-TEM Correlation Widget
+      
   widgets:
-    - command: offlinecorr.random_image_widget
-      display_name: Random Image Widget
-    - command: offlinecorr.load_flm_with_points
-      display_name: Load FLM image with registration points
+    # Existing widgets (keep these if they exist)
+    - command: napari-offlinecorr.make_qwidget
+      display_name: Example QWidget
+    - command: napari-offlinecorr.make_magic_widget
+      display_name: Example Magic Widget
+    
+    # NEW: Add this widget entry
+    - command: napari-offlinecorr.flm_tem_correlation
+      display_name: FLM-TEM Correlation
 
-
+      
