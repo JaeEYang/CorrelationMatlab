@@ -1,0 +1,142 @@
+def points2nav_widget(viewer: "Viewer") -> Container:
+    # GUI widgets
+    csv_edit = FileEdit(label="Points CSV", mode="r", filter="*.csv")
+    nav_edit = FileEdit(label="Template NAV", mode="r", filter="*.nav")
+    combo = ComboBox(label="Assign to Map", choices=[])
+
+    btn_view = PushButton(text="View Points")
+    btn_add = PushButton(text="Add Points to NAV")
+
+    # --- Step 1: Load CSV and preview points
+    def _on_view(event=None):
+        csv_path = csv_edit.value
+        if not csv_path or not Path(csv_path).exists():
+            print(" CSV file not found")
+            return
+
+        coords = np.loadtxt(str(csv_path), delimiter=",")
+        if coords.ndim == 1:
+            coords = coords.reshape(1, -1)
+
+        if coords.shape[1] < 2:
+            print(" CSV must have at least 2 columns (X,Y)")
+            return
+
+        # Preview only XY for Napari
+        pts = coords[:, :2]
+        viewer.add_points(
+            pts,
+            name="Preview Points",
+            size=10,
+            face_color="yellow",
+        )
+        print(f" Displayed {pts.shape[0]} points from {csv_path}")
+
+    # --- Step 2: Load NAV file (after CSV is already loaded)
+    def _on_nav_change(event=None):
+        nav_path = nav_edit.value
+        if nav_path and Path(nav_path).exists():
+            navdata = nb.parseNavFile(str(nav_path))
+            if navdata.Maps:
+                combo._maps = navdata.Maps  # store objects
+                combo.choices = [
+                    f"Map {m.Label} (ID={m.MapID}, Regis={m.Regis})"
+                    for m in navdata.Maps
+                ]
+                print(f" Loaded {len(navdata.Maps)} map(s) from {nav_path}")
+
+    nav_edit.changed.connect(_on_nav_change)
+
+    # --- Step 3: Add points into NAV
+    def _on_add(event=None):
+        csv_path = csv_edit.value
+        nav_path = nav_edit.value
+
+        if not csv_path or not Path(csv_path).exists():
+            print(" CSV file not found")
+            return
+        if not nav_path or not Path(nav_path).exists():
+            print(" Template NAV file not found")
+            return
+        if not hasattr(combo, "_maps") or combo.value is None:
+            print(" Please select a map from the dropdown")
+            return
+
+        # Ask where to save
+        out_path, _ = QFileDialog.getSaveFileName(
+            None, "Save Output NAV", "output.nav", "NAV Files (*.nav)"
+        )
+        if not out_path:
+            print("⚠ Save cancelled")
+            return
+
+        # Parse NAV and chosen map
+        navdata = nb.parseNavFile(str(nav_path))
+
+        # Find the index of the currently selected item
+        if combo.value not in combo.choices:
+            print("No valid map selected")
+            return
+        
+        map_index = combo.choices.index(combo.value)
+        map_item = combo._maps[map_index]
+
+        # Load CSV coords
+        coords = np.loadtxt(str(csv_path), delimiter=",")
+        if coords.ndim == 1:
+            coords = coords.reshape(1, -1)
+
+        new_points = []
+        point_layer_data = []
+
+        for j, row in enumerate(coords, start=1):
+            if len(row) == 2:
+                x, y = row
+                z = 0.0
+            else:
+                x, y, z = row[:3]
+
+            p = nb.PointItem()
+            p.Label = str(len(navdata.Points) + j)
+            p.StageXYZ = [float(x), float(y), float(z)]
+            p.PtsX = float(x)
+            p.PtsY = float(y)
+            p.DrawnID = map_item.MapID
+            p.Regis = map_item.Regis
+            navdata.addPointItem(p)
+            new_points.append(p)
+            point_layer_data.append([x, y])
+
+        # Write out new NAV
+        with open(out_path, "w") as f:
+            with open(nav_path, "r") as fin:
+                f.write(fin.read()) # preserve everything
+            
+            last_item_num = 0
+            with open(nav_path, "r") as fin:
+                for line in fin:
+                    if line.strip().startswith("[Item"):
+                        try:
+                            num = int(line.split("=")[1].strip("] "))
+                            last_item_num = max(last_item_num, num)
+                        except Exception:
+                            pass
+            for offset, p in enumerate(new_points, start=1):
+                item_num = last_item_num + offset
+                lines = p.getText()[:]
+                if lines:
+                    if lines[0].startswith("[Item"):
+                        lines[0] = f"[Item = {item_num}]"
+                    else:
+                        lines.insert(0, f"[Item = {item_num}]")
+
+                f.write("\n\n")
+                f.write("\n".join(lines))
+
+        print(f" NAV written: {out_path}")
+
+    # Hook up buttons
+    btn_view.clicked.connect(_on_view)
+    btn_add.clicked.connect(_on_add)
+
+    return Container(widgets=[csv_edit, btn_view, nav_edit, combo, btn_add])
