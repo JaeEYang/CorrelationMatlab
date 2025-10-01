@@ -1,6 +1,6 @@
 from napari import current_viewer
 from magicgui.widgets import Container, Label
-from .offline_widgets import load_images_widget, make_image_panel, load_points_widget
+from .offline_widgets import load_images_widget, make_image_panel, load_points_widget, points2nav_widget
 
 def offline_correlation_widget():
     viewer = current_viewer()
@@ -15,5 +15,6 @@ def offline_correlation_widget():
 def serialem_integration_widget():
     viewer = current_viewer()
     return Container(widgets=[
-        Label(value="SerialEM Integration Tools (coming soon)"),
+        Label(value="SerialEM Integration Tools"),
+        points2nav_widget(viewer),   
     ])
