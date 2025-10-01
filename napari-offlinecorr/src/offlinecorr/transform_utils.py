@@ -12,23 +12,18 @@ def compute_transform(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
     """
     Compute 3x3 affine transformation matrix from FLM to TEM coordinates.
     
-    Converted from MATLAB: M = Q * P' * inv(P * P')
-    
     Parameters
     ----------
     P : np.ndarray
         3xN matrix of source points (FLM coordinates) in homogeneous coordinates.
-        Rows are [x, y, 1] for each point.
     Q : np.ndarray
         3xN matrix of target points (TEM coordinates) in homogeneous coordinates.
-        Rows are [x, y, 1] for each point.
     
     Returns
     -------
     transform_matrix : np.ndarray
-        3x3 affine transformation matrix that maps P to Q.
+        3x3 affine transformation matrix.
     """
-    # M = Q * P' * inv(P * P')
     transform_matrix = Q @ P.T @ np.linalg.inv(P @ P.T)
     return transform_matrix
 

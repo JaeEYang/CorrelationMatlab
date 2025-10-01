@@ -121,6 +121,22 @@ class FLMTEMImageWarpWidget(QWidget):
         self.matrix_display.setPlaceholderText("Transformation matrix will appear here...")
         compute_layout.addWidget(self.matrix_display)
         
+        # Manual matrix input
+        manual_label = QLabel("<b>OR</b> manually input transformation matrix:")
+        compute_layout.addWidget(manual_label)
+        
+        self.manual_matrix_input = QTextEdit()
+        self.manual_matrix_input.setMaximumHeight(80)
+        self.manual_matrix_input.setPlaceholderText(
+            "Paste 3x3 matrix (9 numbers, comma or space separated):\n"
+            "Example: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]"
+        )
+        compute_layout.addWidget(self.manual_matrix_input)
+        
+        self.load_manual_btn = QPushButton("Load Manual Matrix")
+        self.load_manual_btn.clicked.connect(self._load_manual_matrix)
+        compute_layout.addWidget(self.load_manual_btn)
+        
         compute_group.setLayout(compute_layout)
         main_layout.addWidget(compute_group)
         
@@ -305,6 +321,54 @@ class FLMTEMImageWarpWidget(QWidget):
             QMessageBox.critical(
                 self, "Error", 
                 f"Failed to compute transformation:\n{str(e)}"
+            )
+            import traceback
+            traceback.print_exc()
+            
+    def _load_manual_matrix(self):
+        """Load transformation matrix from manual text input."""
+        try:
+            text = self.manual_matrix_input.toPlainText().strip()
+            
+            # Try to parse as numpy array format or comma-separated
+            # Remove brackets and newlines, split by comma or whitespace
+            text = text.replace('[', '').replace(']', '').replace('\n', ' ')
+            numbers = [float(x) for x in text.replace(',', ' ').split() if x]
+            
+            if len(numbers) != 9:
+                raise ValueError(f"Expected 9 numbers, got {len(numbers)}")
+            
+            # Reshape to 3x3
+            self.transform_matrix = np.array(numbers).reshape(3, 3)
+            
+            # Display the loaded matrix
+            matrix_str = "Manually Loaded Matrix:\n"
+            matrix_str += np.array2string(
+                self.transform_matrix,
+                precision=6,
+                suppress_small=True,
+                separator=', '
+            )
+            self.matrix_display.setText(matrix_str)
+            
+            print("Loaded manual transformation matrix:")
+            print(self.transform_matrix)
+            
+            # Enable warp button if both images are loaded
+            if self.flm_image is not None and self.tem_image is not None:
+                self.warp_btn.setEnabled(True)
+            
+            QMessageBox.information(
+                self, "Success",
+                "Manual transformation matrix loaded successfully!"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to parse matrix:\n{str(e)}\n\n"
+                "Expected format: 9 numbers separated by commas or spaces\n"
+                "Example: 1, 0, 0, 0, 1, 0, 0, 0, 1"
             )
             import traceback
             traceback.print_exc()

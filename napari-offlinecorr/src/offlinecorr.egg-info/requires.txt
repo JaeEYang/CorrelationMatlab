@@ -1,3 +1,6 @@
 napari
 numpy
+pandas
+scipy
 scikit-image
+qtpy
