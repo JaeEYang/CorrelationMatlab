@@ -9,8 +9,9 @@ from scipy.ndimage import rotate as ndi_rotate
 # Global state: linked images and points
 assigned_images = {"Image 1": None, "Image 2": None}
 assigned_points = {"Image 1": None, "Image 2": None}
-original_images = {}     # store original image arrays
+original_images = {}     # store original (padded) image arrays
 original_points = {"Image 1": None, "Image 2": None}  # store original points arrays
+offsets = {"Image 1": (0, 0), "Image 2": (0, 0)}      # store offsets from prepare_canvas
 
 
 # ---------------------------
@@ -96,23 +97,37 @@ def reconstruct_from_nav(mrc_path: Path, coords):
 
 
 # ---------------------------
-# Rotation helpers
+# Rotation helpers with fixed canvas
 # ---------------------------
-def rotate_image(data, angle):
-    """Rotate image expanding canvas so it doesn't get cropped."""
-    return ndi_rotate(data, angle, reshape=True, order=1, mode="constant", cval=0)
+def prepare_canvas(data):
+    """Pad image into a square canvas large enough to hold any rotation.
+       Returns (canvas, (y_offset, x_offset))."""
+    h, w = data.shape[:2]
+    diag = int(np.ceil(np.sqrt(h**2 + w**2)))
+    cy, cx = diag // 2, diag // 2
+
+    if data.ndim == 2:
+        canvas = np.zeros((diag, diag), dtype=data.dtype)
+    else:
+        canvas = np.zeros((diag, diag, data.shape[2]), dtype=data.dtype)
+
+    y0, x0 = cy - h // 2, cx - w // 2
+    canvas[y0:y0+h, x0:x0+w] = data
+    return canvas, (y0, x0)
 
 
-def rotate_points(points, angle, shape, new_shape):
+def rotate_image_fixed(data, angle):
+    """Rotate image inside fixed canvas (no jumping)."""
+    return ndi_rotate(data, angle, reshape=False, order=1, mode="constant", cval=0)
+
+
+def rotate_points_fixed(points, angle, shape):
+    """Rotate points around fixed canvas center."""
     if points is None or len(points) == 0:
         return points
 
     h, w = shape[:2]
-    new_h, new_w = new_shape[:2]
-
-    # centro original y centro nuevo
     cy, cx = h / 2, w / 2
-    new_cy, new_cx = new_h / 2, new_w / 2
 
     theta = -np.deg2rad(angle)
     R = np.array([
@@ -123,12 +138,9 @@ def rotate_points(points, angle, shape, new_shape):
     pts = points.copy().astype(float)
     ys, xs = pts[:, 0], pts[:, 1]
 
-    # trasladar al centro original
     coords = np.stack([xs - cx, ys - cy], axis=1)
-    # rotar
     rotated = coords @ R.T
-    # trasladar al nuevo centro
-    new_xs, new_ys = rotated[:, 0] + new_cx, rotated[:, 1] + new_cy
+    new_xs, new_ys = rotated[:, 0] + cx, rotated[:, 1] + cy
 
     return np.stack([new_ys, new_xs], axis=1)
 
@@ -153,10 +165,15 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
         if Path(mrc_path).suffix.lower() == ".mrc":
             with mrcfile.open(str(mrc_path), permissive=True) as mrc:
                 data = np.copy(mrc.data)
-            viewer.add_image(data, name=Path(mrc_path).stem, colormap="gray")
+            canvas, offset = prepare_canvas(data)
+            viewer.add_image(canvas, name=Path(mrc_path).stem, colormap="gray")
         else:
             img = io.imread(str(mrc_path))
-            viewer.add_image(img, name=Path(mrc_path).stem)
+            canvas, offset = prepare_canvas(img)
+            viewer.add_image(canvas, name=Path(mrc_path).stem)
+
+        # guardar offset
+        offsets["Image 1"] = offset
 
         # If nav present, try montage maps
         if nav_path and Path(nav_path).exists():
@@ -169,7 +186,8 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
                     if not mrc_file.exists():
                         continue
                     montage = reconstruct_from_nav(mrc_file, info["coords"])
-                    viewer.add_image(montage, name=f"Montage Map {mid}", colormap="gray")
+                    montage_canvas, offset = prepare_canvas(montage)
+                    viewer.add_image(montage_canvas, name=f"Montage Map {mid}", colormap="gray")
 
     button.clicked.connect(_on_click)
     return Container(widgets=[mrc_edit, nav_edit, button])
@@ -210,14 +228,13 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         base = original_images.get(name, layer.data)
         angle = angle_slider.value
 
-        rotated = rotate_image(base, angle)
+        rotated = rotate_image_fixed(base, angle)
         layer.data = rotated
 
-        # rotate points from their original version
         points_layer = assigned_points.get(name)
         if points_layer is not None:
             base_points = original_points.get(name, points_layer.data)
-            points_layer.data = rotate_points(base_points, angle, base.shape, rotated.shape)
+            points_layer.data = rotate_points_fixed(base_points, angle, base.shape)
 
     def flip_vertical(points, img_shape):
         H, W = img_shape[:2]
@@ -286,6 +303,12 @@ def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
 
         if pts.shape[1] >= 2:
             name = combo.value
+
+            # aplicar offset de la imagen para alinear con el canvas
+            y0, x0 = offsets.get(name, (0, 0))
+            pts[:, 0] += y0
+            pts[:, 1] += x0
+
             layer = viewer.add_points(
                 pts[:, :2],
                 name=f"{name} Points",
