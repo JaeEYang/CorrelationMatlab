@@ -1,6 +1,10 @@
 README.md
 pyproject.toml
+src/correlation2d3d/Nav2Points.py
+src/correlation2d3d/NavBuilt.py
 src/correlation2d3d/Points2Nav.py
+src/correlation2d3d/Points2Nav_tem.py
+src/correlation2d3d/SupportNav.py
 src/correlation2d3d/__init__.py
 src/correlation2d3d/_widget.py
 src/correlation2d3d/napari.yaml

@@ -36,22 +36,25 @@ def csv_to_nav(csv_file, nav_template, output_file,
     with open(csv_file, "r") as f:
         csvLines = list(csv.reader(f, delimiter=","))
     xyArray = []
-    for line in csvLines[1:]:
+    for line in csvLines:
         try:
-            x = float(line[1]) - mapwidth / 2
-            y = float(line[2]) - mapheight / 2
+            x = float(line[0]) - mapwidth / 2
+            y = float(line[1]) - mapheight / 2
             xyArray.append((x, y))
         except Exception:
             pass
+
+    print("First 3 CSV coords:", xyArray[:3])
+
     GNnav = sn.parseFile(nav_template)
 
     msn = [[float(mapscalemat[0]), float(mapscalemat[1])],
            [float(mapscalemat[2]), float(mapscalemat[3])]]
     
-    msmInv = sn.invertMatrix(msm)
+    msnInv = sn.invertMatrix(msn)
 
     XYArray = sn.transposeMatrix(xyArray)
-    XYTransform = sn.matrixMultiply(msmInv, XYArray)
+    XYTransform = sn.matrixMultiply(msnInv, XYArray)
 
     prototype = createPrototypeItem(GNnav)
 
@@ -66,13 +69,13 @@ def csv_to_nav(csv_file, nav_template, output_file,
             elif "MapWidthHeight" in line:
                 f.write(f"MapWidthHeight = {mapwidth} {mapheight}\n")
             elif "MapScaleMat" in line:
-                f.write(f"MapScaleMat = {msm[0][0]} {msm[0][1]} {msm[1][0]} {msm[1][1]}\n")
+                f.write(f"MapScaleMat = {msn[0][0]} {msn[0][1]} {msn[1][0]} {msn[1][1]}\n")
             else:
                 f.write(line + "\n")
 
         ## write point items
         itemIndex = start_index
-        for x, y in XYTransform:
+        for x, y in zip(XYTransform[0], XYTransform[1]):
             newItem = [["Item", itemIndex]]
             itemIndex += 1
 

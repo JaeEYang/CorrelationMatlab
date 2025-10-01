@@ -4,6 +4,11 @@ from magicgui.widgets import FileEdit, PushButton, ComboBox, Container, Label
 import mrcfile
 from skimage import io
 from napari.layers import Image
+from correlation2d3d import NavBuilt as nb
+from correlation2d3d import SupportNav as sn
+from qtpy.QtWidgets import QFileDialog
+from napari.viewer import Viewer
+import re
 
 # Global state: linked images and points
 assigned_images = {"Image 1": None, "Image 2": None}
@@ -13,86 +18,164 @@ assigned_points = {"Image 1": None, "Image 2": None}
 # ---------------------------
 # NAV parsing + reconstruction
 # ---------------------------
-def parse_nav(nav_path):
-    """Parse SerialEM .nav file for montage maps and points."""
 
-    # Normalize input to Path
-    try:
-        nav_path = Path(nav_path)
-    except Exception:
-        print(f"Invalid nav_path: {nav_path}")
-        return {}, []
+def get_last_item_number(nav_path: str) -> int:
+    """
+    Scan NAV file and return the highest [Item = N] number.
+    """
+    last_num = 0
+    pattern = re.compile(r"\[Item\s*=\s*(\d+)\]")
+    with open(nav_path, "r") as f:
+        for line in f:
+            match = pattern.match(line.strip())
+            if match:
+                num = int(match.group(1))
+                last_num = max(last_num, num)
+    return last_num
 
-    # Check existence
-    if not nav_path.exists():
-        print(f"NAV file does not exist: {nav_path}")
-        return {}, []
+def points2nav_widget(viewer: "Viewer") -> Container:
+    # GUI widgets
+    csv_edit = FileEdit(label="Points CSV", mode="r", filter="*.csv")
+    nav_edit = FileEdit(label="Template NAV", mode="r", filter="*.nav")
+    combo = ComboBox(label="Assign to Map", choices=[])
 
-    maps = {}
-    points = []
-    current_map = None
-    map_id = None
+    btn_view = PushButton(text="View Points")
+    btn_add = PushButton(text="Add Points to NAV")
 
-    try:
-        with open(nav_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line == "Map":
-                    current_map = {}
-                    map_id = None
-                elif line.startswith("MapID"):
-                    map_id = int(line.split("=")[1].strip())
-                    maps[map_id] = current_map
-                elif line.startswith("ImageFile"):
-                    if current_map is not None:
-                        current_map["file"] = line.split("=")[1].strip()
-                elif line.startswith("PieceCoordinates"):
-                    coords = line.split("=")[1].strip().split()
-                    if current_map is not None:
-                        if "coords" not in current_map:
-                            current_map["coords"] = []
-                        current_map["coords"].append((int(coords[0]), int(coords[1])))
-                elif line.startswith("Point"):
-                    points.append({})
-                elif line.startswith("StageX") and points:
-                    points[-1]["x"] = float(line.split("=")[1].strip())
-                elif line.startswith("StageY") and points:
-                    points[-1]["y"] = float(line.split("=")[1].strip())
-                elif line.startswith("StageZ") and points:
-                    points[-1]["z"] = float(line.split("=")[1].strip())
-    except Exception as e:
-        print(f"❌ Failed to parse NAV file {nav_path}: {e}")
-        return {}, []
+    # --- Step 1: Load CSV and preview points
+    def _on_view(event=None):
+        csv_path = csv_edit.value
+        if not csv_path or not Path(csv_path).exists():
+            print(" CSV file not found")
+            return
 
-    return maps, points
+        coords = np.loadtxt(str(csv_path), delimiter=",")
+        if coords.ndim == 1:
+            coords = coords.reshape(1, -1)
 
-def reconstruct_from_nav(mrc_path: Path, coords):
-    """Reconstruct montage image from tile stack + piece coordinates."""
-    with mrcfile.open(str(mrc_path), permissive=True) as mrc:
-        tiles = np.copy(mrc.data)
+        if coords.shape[1] < 2:
+            print(" CSV must have at least 2 columns (X,Y)")
+            return
 
-    if tiles.ndim != 3:
-        raise ValueError("Expected stack of 2D tiles in MRC")
+        # Preview only XY for Napari
+        pts = coords[:, :2]
+        if "Preview Points" in viewer.layers:
+            viewer.layers["Preview Points"].data = pts
+        else:
+            viewer.add_points(
+                pts,
+                name="Preview Points",
+                size=10,
+                face_color="yellow",
+            )
+        print(f" Displayed {pts.shape[0]} points from {csv_path}")
 
-    h, w = tiles.shape[1:]
-    xs = [c[0] for c in coords]
-    ys = [c[1] for c in coords]
+    # --- Step 2: Load NAV file (after CSV is already loaded)
+    def _on_nav_change(event=None):
+        nav_path = nav_edit.value
+        if nav_path and Path(nav_path).exists():
+            navdata = nb.parseNavFile(str(nav_path))
+            if navdata.Maps:
+                combo._maps = navdata.Maps  # store objects
+                combo.choices = [
+                    f"Map {m.Label} (ID={m.MapID}, Regis={m.Regis})"
+                    for m in navdata.Maps
+                ]
+                print(f" Loaded {len(navdata.Maps)} map(s) from {nav_path}")
 
-    min_x, min_y = min(xs), min(ys)
-    xs = [x - min_x for x in xs]
-    ys = [y - min_y for y in ys]
+    nav_edit.changed.connect(_on_nav_change)
 
-    canvas_h = max(ys) + h
-    canvas_w = max(xs) + w
-    canvas = np.zeros((canvas_h, canvas_w), dtype=tiles.dtype)
+    # --- Step 3: Add points into NAV
+    def _on_add(event=None):
+        csv_path = csv_edit.value
+        nav_path = nav_edit.value
 
-    for i, (x, y) in enumerate(zip(xs, ys)):
-        canvas[y:y+h, x:x+w] = tiles[i]
+        if not csv_path or not Path(csv_path).exists():
+            print(" CSV file not found")
+            return
+        if not nav_path or not Path(nav_path).exists():
+            print(" Template NAV file not found")
+            return
+        if not hasattr(combo, "_maps") or combo.value is None:
+            print(" Please select a map from the dropdown")
+            return
 
-    return canvas
+        # Ask where to save
+        out_path, _ = QFileDialog.getSaveFileName(
+            None, "Save Output NAV", "output.nav", "NAV Files (*.nav)"
+        )
+        if not out_path:
+            print("⚠ Save cancelled")
+            return
 
+        # Parse NAV and chosen map
+        navdata = nb.parseNavFile(str(nav_path))
+
+        # Find the index of the currently selected item
+        if combo.value not in combo.choices:
+            print("No valid map selected")
+            return
+        
+        map_index = combo.choices.index(combo.value)
+        map_item = combo._maps[map_index]
+
+        try:
+            coords = viewer.layers["Preview Points"].data
+        except KeyError:
+            print("⚠ No Preview Points layer found")
+            return
+        
+        # Load CSV coords
+        if coords.ndim == 1:
+            coords = coords.reshape(1, -1)
+
+        # --- FIX: get last item number once from template
+        last_item_num = get_last_item_number(nav_path)
+        print(f"Last item number found in template NAV = {last_item_num}")
+
+        new_points = []
+
+        for offset, row in enumerate(coords, start=1):
+            if len(row) == 2:
+                x, y = row
+                z = 0.0
+            else:
+                x, y, z = row[:3]
+
+            item_num = last_item_num + offset  # stable numbering
+
+            p = nb.PointItem()
+            p.Label = str(item_num)
+            p.StageXYZ = [float(x), float(y), float(z)]
+            p.PtsX = float(x)
+            p.PtsY = float(y)
+            p.DrawnID = map_item.MapID
+            p.Regis = map_item.Regis
+            new_points.append((item_num, p))
+
+        # Write out new NAV
+        with open(out_path, "w") as f:
+            with open(nav_path, "r") as fin:
+                f.write(fin.read()) # preserve everything
+
+            for item_num, p in new_points:
+                lines = p.getText()[:]
+                if lines:
+                    if lines[0].startswith("[Item"):
+                        lines[0] = f"[Item = {item_num}]"
+                    else:
+                        lines.insert(0, f"[Item = {item_num}]")
+
+                f.write("\n\n")
+                f.write("\n".join(lines))
+
+        print(f" NAV written: {out_path}")
+
+    # Hook up buttons
+    btn_view.clicked.connect(_on_view)
+    btn_add.clicked.connect(_on_add)
+
+    return Container(widgets=[csv_edit, btn_view, nav_edit, combo, btn_add])
 
 # ---------------------------
 # Load Images Widget
