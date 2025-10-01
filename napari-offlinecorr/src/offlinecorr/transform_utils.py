@@ -92,11 +92,58 @@ def save_transformed_points(transformed_pts: np.ndarray, output_path: str):
     print(f"Saved {transformed_pts.shape[1]} transformed points to {output_path}")
 
 
-def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple) -> np.ndarray:
+def compute_warped_bounds(img_shape: tuple, M: np.ndarray) -> tuple:
+    """
+    Compute the bounding box needed to contain the warped image.
+    
+    Parameters
+    ----------
+    img_shape : tuple
+        (height, width) of input image
+    M : np.ndarray
+        3x3 transformation matrix
+    
+    Returns
+    -------
+    output_shape : tuple
+        (height, width) for output image
+    offset : np.ndarray
+        Translation offset to apply [x_offset, y_offset]
+    """
+    h, w = img_shape[:2]
+    
+    # Define the four corners of the input image in homogeneous coordinates
+    corners = np.array([
+        [0, 0, 1],      # top-left
+        [w, 0, 1],      # top-right
+        [w, h, 1],      # bottom-right
+        [0, h, 1]       # bottom-left
+    ]).T  # 3x4
+    
+    # Transform corners
+    transformed_corners = M @ corners  # 3x4
+    
+    # Extract x, y coordinates (ignore homogeneous coordinate)
+    x_coords = transformed_corners[0, :]
+    y_coords = transformed_corners[1, :]
+    
+    # Find bounding box
+    x_min, x_max = np.min(x_coords), np.max(x_coords)
+    y_min, y_max = np.min(y_coords), np.max(y_coords)
+    
+    # Compute output size (round up to include all pixels)
+    output_width = int(np.ceil(x_max - x_min))
+    output_height = int(np.ceil(y_max - y_min))
+    
+    # Offset to shift the image so top-left corner is at (0, 0)
+    offset = np.array([x_min, y_min])
+    
+    return (output_height, output_width), offset
+
+def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple = None) -> tuple:
     """
     Transform image using 3x3 affine transformation matrix.
-    
-    Converted from MATLAB warpImage.m
+    Matches MATLAB's imwarp behavior with imref2d.
     
     Parameters
     ----------
@@ -104,30 +151,48 @@ def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple) -> np.ndarray:
         Input image (2D grayscale or 3D RGB).
     M : np.ndarray
         3x3 transformation matrix.
-    ref_size : tuple
+    ref_size : tuple, optional
         (height, width) of output reference image.
     
     Returns
     -------
     warped_img : np.ndarray
-        Transformed image with size matching ref_size.
+        Transformed image.
+    offset : None
+        Always None when using ref_size (for API compatibility)
     """
     from scipy.ndimage import affine_transform
     
+    if ref_size is None:
+        raise ValueError("ref_size must be provided")
+    
     # Extract 2x2 linear part and translation from 3x3 matrix
+    # M maps from input (FLM) to output (TEM) coordinates
     linear_part = M[:2, :2]
     translation = M[:2, 2]
     
-    # scipy's affine_transform uses inverse transformation
+    # scipy's affine_transform needs the INVERSE transformation
+    # because it maps output pixel locations back to input locations
     try:
         inv_linear = np.linalg.inv(linear_part)
     except np.linalg.LinAlgError:
         # Singular matrix, return zeros
         if img.ndim == 3:
-            return np.zeros((*ref_size, img.shape[2]), dtype=img.dtype)
-        return np.zeros(ref_size, dtype=img.dtype)
+            return np.zeros((*ref_size, img.shape[2]), dtype=img.dtype), None
+        return np.zeros(ref_size, dtype=img.dtype), None
     
+    # Compute inverse translation
+    # For each output pixel at (x_out, y_out), we need to find (x_in, y_in)
+    # x_out = M @ x_in, so x_in = M^-1 @ x_out
     inv_translation = -inv_linear @ translation
+    
+    # MATLAB uses pixel-center coordinates (0.5, 0.5) for first pixel
+    # scipy uses pixel-corner coordinates (0, 0) for first pixel
+    # We need to adjust for this half-pixel offset
+    
+    # Adjust the inverse transformation to account for pixel-center convention
+    # When sampling, shift by 0.5 to align with MATLAB's convention
+    inv_translation = inv_translation + inv_linear @ np.array([0.5, 0.5]) - 0.5
     
     # Handle RGB images (3 channels)
     if img.ndim == 3:
@@ -138,7 +203,7 @@ def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple) -> np.ndarray:
                 matrix=inv_linear,
                 offset=inv_translation,
                 output_shape=ref_size,
-                order=1,
+                order=1,  # Linear interpolation (bilinear)
                 mode='constant',
                 cval=0
             )
@@ -154,8 +219,7 @@ def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple) -> np.ndarray:
             cval=0
         )
     
-    return warped_img
-
+    return warped_img, None
 
 def compare_with_expected(output_csv: str, expected_csv: str) -> Tuple[bool, str]:
     """
