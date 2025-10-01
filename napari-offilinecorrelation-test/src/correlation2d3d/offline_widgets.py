@@ -242,8 +242,8 @@ def rotate_points_fixed(points, angle, shape):
 # Load Images Widget
 # ---------------------------
 def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
-    mrc_edit = FileEdit(label="", mode="r", filter="*.mrc *.st *.tif *.tiff *.png *.jpg")
-    nav_edit = FileEdit(label="", mode="r", filter="*.nav")
+    mrc_edit = FileEdit(label="Image File", mode="r", filter="*.mrc *.st *.tif *.tiff *.png *.jpg")
+    nav_edit = FileEdit(label="Navigator file(*.nav)", mode="r", filter="*.nav")
     button = PushButton(text="Load Images")
 
     # toggle: decide if we also show raw stack (default: False to avoid confusion)
@@ -407,7 +407,7 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
 # Load Points Widget (robust CSV)
 # ---------------------------
 def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
-    file_edit = FileEdit(label="", mode="r", filter="*.csv")
+    file_edit = FileEdit(label="Coordinates file (*.csv)", mode="r", filter="*.csv")
     combo = ComboBox(label="Assign to", choices=["Image 1", "Image 2"])
     button = PushButton(text="Load Points")
 
