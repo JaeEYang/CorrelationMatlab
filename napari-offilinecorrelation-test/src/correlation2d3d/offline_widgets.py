@@ -149,7 +149,7 @@ def rotate_points_fixed(points, angle, shape):
 # Load Images Widget
 # ---------------------------
 def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
-    mrc_edit = FileEdit(label="", mode="r", filter="*.mrc *.tif *.tiff *.png *.jpg")
+    mrc_edit = FileEdit(label="", mode="r", filter="*.mrc *.st *.tif *.tiff *.png *.jpg")
     nav_edit = FileEdit(label="", mode="r", filter="*.nav")
     button = PushButton(text="Load Images")
 
@@ -162,7 +162,7 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
             return
 
         # Load MRC or normal image
-        if Path(mrc_path).suffix.lower() == ".mrc":
+        if Path(mrc_path).suffix.lower() in [".mrc", ".st"]:
             with mrcfile.open(str(mrc_path), permissive=True) as mrc:
                 data = np.copy(mrc.data)
             canvas, offset = prepare_canvas(data)
