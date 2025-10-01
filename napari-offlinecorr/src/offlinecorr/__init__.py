@@ -7,14 +7,11 @@ try:
 except ImportError:
     __version__ = "unknown"
 
-# Import existing widgets
-from ._widget import ExampleQWidget, example_magic_widget
-
-# Import new FLM-TEM correlation widget
-from .correlation_widget import FLMTEMCorrelationWidget
+# Import both widgets
+from .point_transform_widget import FLMTEMPointTransformWidget
+from .image_warp_widget import FLMTEMImageWarpWidget
 
 __all__ = (
-    "ExampleQWidget",
-    "example_magic_widget",
-    "FLMTEMCorrelationWidget",  # Add this
+    "FLMTEMPointTransformWidget",
+    "FLMTEMImageWarpWidget",
 )

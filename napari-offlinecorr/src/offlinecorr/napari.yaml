@@ -1,29 +1,16 @@
-name: napari-offlinecorr
+name: offlinecorr
 display_name: Offline Correlation
 contributions:
   commands:
-    # Existing commands (keep these if they exist)
-    - id: napari-offlinecorr.make_qwidget
-      python_name: offlinecorr._widget:ExampleQWidget
-      title: Make example QWidget
-    - id: napari-offlinecorr.make_magic_widget
-      python_name: offlinecorr._widget:example_magic_widget
-      title: Make example magic widget
-    
-    # NEW: Add this command for FLM-TEM correlation
-    - id: napari-offlinecorr.flm_tem_correlation
-      python_name: offlinecorr.correlation_widget:FLMTEMCorrelationWidget
-      title: FLM-TEM Correlation Widget
+    - id: offlinecorr.point_transform
+      python_name: offlinecorr.point_transform_widget:FLMTEMPointTransformWidget
+      title: FLM-TEM Point Transform
+    - id: offlinecorr.image_warp
+      python_name: offlinecorr.image_warp_widget:FLMTEMImageWarpWidget
+      title: FLM-TEM Image Warp
       
   widgets:
-    # Existing widgets (keep these if they exist)
-    - command: napari-offlinecorr.make_qwidget
-      display_name: Example QWidget
-    - command: napari-offlinecorr.make_magic_widget
-      display_name: Example Magic Widget
-    
-    # NEW: Add this widget entry
-    - command: napari-offlinecorr.flm_tem_correlation
-      display_name: FLM-TEM Correlation
-
-      
+    - command: offlinecorr.point_transform
+      display_name: Point Transform
+    - command: offlinecorr.image_warp
+      display_name: Image Warp

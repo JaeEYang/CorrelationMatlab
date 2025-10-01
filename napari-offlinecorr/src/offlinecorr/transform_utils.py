@@ -58,31 +58,15 @@ def transform_points(transform_matrix: np.ndarray, pts: np.ndarray) -> np.ndarra
 def load_registration_points(csv_path: str) -> np.ndarray:
     """
     Load points from CSV and convert to homogeneous coordinates (3xN format).
-    
-    Parameters
-    ----------
-    csv_path : str
-        Path to CSV file containing x,y coordinates.
-    
-    Returns
-    -------
-    points_homogeneous : np.ndarray
-        3xN array with rows [x, y, 1].
+    CSVs have no header row - just comma-separated x,y,1 values.
     """
-    df = pd.read_csv(csv_path)
+    # Read without header since files have no header row
+    df = pd.read_csv(csv_path, header=None)
     
-    # Try to find x,y columns (case insensitive)
-    cols = df.columns.str.lower()
-    if 'x' in cols.values and 'y' in cols.values:
-        x_col = df.columns[cols == 'x'][0]
-        y_col = df.columns[cols == 'y'][0]
-        points = df[[x_col, y_col]].values
-    else:
-        # Use first two columns
-        points = df.iloc[:, :2].values
+    # Use first two columns (x and y coordinates)
+    points = df.iloc[:, :2].values
     
     # Convert to 3xN homogeneous coordinates
-    # points is Nx2, we need 3xN
     N = points.shape[0]
     points_homogeneous = np.vstack([
         points[:, 0],  # x coordinates
@@ -95,22 +79,82 @@ def load_registration_points(csv_path: str) -> np.ndarray:
 
 def save_transformed_points(transformed_pts: np.ndarray, output_path: str):
     """
-    Save transformed points to CSV file.
+    Save transformed points to CSV file without header row.
+    Saves all 3 columns: x, y, z.
+    """
+    # Transpose to get rows as points (N x 3 format)
+    # transformed_pts is 3xN, we need Nx3 for CSV output
+    output_data = transformed_pts.T  # Now Nx3
+    
+    # Save without index and without header
+    df = pd.DataFrame(output_data)
+    df.to_csv(output_path, index=False, header=False)
+    print(f"Saved {transformed_pts.shape[1]} transformed points to {output_path}")
+
+
+def warp_image(img: np.ndarray, M: np.ndarray, ref_size: tuple) -> np.ndarray:
+    """
+    Transform image using 3x3 affine transformation matrix.
+    
+    Converted from MATLAB warpImage.m
     
     Parameters
     ----------
-    transformed_pts : np.ndarray
-        3xN matrix of transformed points in homogeneous coordinates.
-    output_path : str
-        Path for output CSV file.
+    img : np.ndarray
+        Input image (2D grayscale or 3D RGB).
+    M : np.ndarray
+        3x3 transformation matrix.
+    ref_size : tuple
+        (height, width) of output reference image.
+    
+    Returns
+    -------
+    warped_img : np.ndarray
+        Transformed image with size matching ref_size.
     """
-    # Extract x, y from homogeneous coordinates (first two rows)
-    df = pd.DataFrame({
-        'x': transformed_pts[0, :],
-        'y': transformed_pts[1, :]
-    })
-    df.to_csv(output_path, index=False)
-    print(f"Saved {transformed_pts.shape[1]} transformed points to {output_path}")
+    from scipy.ndimage import affine_transform
+    
+    # Extract 2x2 linear part and translation from 3x3 matrix
+    linear_part = M[:2, :2]
+    translation = M[:2, 2]
+    
+    # scipy's affine_transform uses inverse transformation
+    try:
+        inv_linear = np.linalg.inv(linear_part)
+    except np.linalg.LinAlgError:
+        # Singular matrix, return zeros
+        if img.ndim == 3:
+            return np.zeros((*ref_size, img.shape[2]), dtype=img.dtype)
+        return np.zeros(ref_size, dtype=img.dtype)
+    
+    inv_translation = -inv_linear @ translation
+    
+    # Handle RGB images (3 channels)
+    if img.ndim == 3:
+        warped_img = np.zeros((*ref_size, img.shape[2]), dtype=img.dtype)
+        for c in range(img.shape[2]):
+            warped_img[:, :, c] = affine_transform(
+                img[:, :, c],
+                matrix=inv_linear,
+                offset=inv_translation,
+                output_shape=ref_size,
+                order=1,
+                mode='constant',
+                cval=0
+            )
+    else:
+        # Grayscale image
+        warped_img = affine_transform(
+            img,
+            matrix=inv_linear,
+            offset=inv_translation,
+            output_shape=ref_size,
+            order=1,
+            mode='constant',
+            cval=0
+        )
+    
+    return warped_img
 
 
 def compare_with_expected(output_csv: str, expected_csv: str) -> Tuple[bool, str]:
