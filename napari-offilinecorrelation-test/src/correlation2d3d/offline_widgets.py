@@ -99,17 +99,20 @@ def reconstruct_from_nav(mrc_path: Path, coords):
 # Rotation helpers
 # ---------------------------
 def rotate_image(data, angle):
-    """Rotate image in its original frame (with black corners)."""
-    return ndi_rotate(data, angle, reshape=False, order=1, mode="constant", cval=0)
+    """Rotate image expanding canvas so it doesn't get cropped."""
+    return ndi_rotate(data, angle, reshape=True, order=1, mode="constant", cval=0)
 
 
-def rotate_points(points, angle, shape):
-    """Rotate napari points (y,x) around image center with same direction as ndi_rotate."""
+def rotate_points(points, angle, shape, new_shape):
     if points is None or len(points) == 0:
         return points
 
     h, w = shape[:2]
+    new_h, new_w = new_shape[:2]
+
+    # centro original y centro nuevo
     cy, cx = h / 2, w / 2
+    new_cy, new_cx = new_h / 2, new_w / 2
 
     theta = -np.deg2rad(angle)
     R = np.array([
@@ -120,11 +123,14 @@ def rotate_points(points, angle, shape):
     pts = points.copy().astype(float)
     ys, xs = pts[:, 0], pts[:, 1]
 
-    coords = np.stack([xs - cx, ys - cy], axis=1)  # (x,y)
+    # trasladar al centro original
+    coords = np.stack([xs - cx, ys - cy], axis=1)
+    # rotar
     rotated = coords @ R.T
-    new_xs, new_ys = rotated[:, 0] + cx, rotated[:, 1] + cy
+    # trasladar al nuevo centro
+    new_xs, new_ys = rotated[:, 0] + new_cx, rotated[:, 1] + new_cy
 
-    return np.stack([new_ys, new_xs], axis=1)  # back to (y,x)
+    return np.stack([new_ys, new_xs], axis=1)
 
 
 # ---------------------------
@@ -203,6 +209,7 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
             return
         base = original_images.get(name, layer.data)
         angle = angle_slider.value
+
         rotated = rotate_image(base, angle)
         layer.data = rotated
 
@@ -210,7 +217,7 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
         points_layer = assigned_points.get(name)
         if points_layer is not None:
             base_points = original_points.get(name, points_layer.data)
-            points_layer.data = rotate_points(base_points, angle, base.shape)
+            points_layer.data = rotate_points(base_points, angle, base.shape, rotated.shape)
 
     def flip_vertical(points, img_shape):
         H, W = img_shape[:2]
