@@ -220,17 +220,22 @@ def rotate_image_fixed(data, angle):
 
 
 def rotate_points_fixed(points, angle, shape):
-    if points is None or len(points) == 0:
+    if points is None:
         return points
+    pts = np.asarray(points)
+    if pts.size == 0:
+        return pts
     h, w = shape[:2]
-    cy, cx = h / 2, w / 2
+    cy, cx = h / 2.0, w / 2.0
     theta = -np.deg2rad(angle)
-    R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
-    pts = points.copy().astype(float)
-    ys, xs = pts[:, 0], pts[:, 1]
+    c, s = np.cos(theta), np.sin(theta)
+    R = np.array([[c, -s], [s, c]], dtype=np.float64)
+
+    ys, xs = pts[:, 0].astype(np.float64), pts[:, 1].astype(np.float64)
     coords = np.stack([xs - cx, ys - cy], axis=1)
     rotated = coords @ R.T
-    return np.stack([rotated[:, 1] + cy, rotated[:, 0] + cx], axis=1)
+    out = np.stack([rotated[:, 1] + cy, rotated[:, 0] + cx], axis=1).astype(np.float32)
+    return out
 
 
 # ---------------------------
@@ -298,7 +303,10 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
         else:
             img = io.imread(str(mrc_path))
             canvas, offset = prepare_canvas(img)
-            viewer.add_image(canvas, name=f"{name} [image]")
+            if img.ndim == 2:
+                viewer.add_image(canvas, name=f"{name} [image]", colormap="gray")
+            else:
+                viewer.add_image(canvas, name=f"{name} [image]")
             offsets["Image 1"] = offset
 
         # --- Optional NAV parsing (legacy) ---
@@ -342,7 +350,8 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
 
     def on_angle_change(event=None):
         layer = assigned_images.get(name)
-        if layer is None: return
+        if layer is None:
+            return
         base = original_images.get(name, layer.data)
         if base.ndim == 2 or (base.ndim == 3 and base.shape[-1] in (3, 4)):
             angle = angle_slider.value
@@ -354,13 +363,19 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
                 pts_layer.data = rotate_points_fixed(base_points, angle, base.shape)
 
     def flip_vertical(points, img_shape):
-        new_pts = points.copy(); new_pts[:, 0] = img_shape[0] - 1 - points[:, 0]; return new_pts
+        new_pts = points.copy()
+        new_pts[:, 0] = img_shape[0] - 1 - points[:, 0]
+        return new_pts
+
     def flip_horizontal(points, img_shape):
-        new_pts = points.copy(); new_pts[:, 1] = img_shape[1] - 1 - points[:, 1]; return new_pts
+        new_pts = points.copy()
+        new_pts[:, 1] = img_shape[1] - 1 - points[:, 1]
+        return new_pts
 
     def transform_image(img_fn, pts_fn=None):
         layer = assigned_images.get(name)
-        if layer is None: return
+        if layer is None:
+            return
         data = layer.data
         if data.ndim == 2 or (data.ndim == 3 and data.shape[-1] in (3, 4)):
             layer.data = img_fn(data)
@@ -375,8 +390,12 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
     fliph_btn.clicked.connect(lambda e: transform_image(np.fliplr, flip_horizontal))
 
     def on_new_points(event=None):
-        layer = viewer.add_points(np.empty((0, 2)), name=f"{name} Points", size=12,
-                                  face_color="red" if name == "Image 1" else "blue", edge_color="black")
+        layer = viewer.add_points(
+            np.empty((0, 2)),
+            name=f"{name} Points",
+            size=12,
+            face_color="red" if name == "Image 1" else "blue",
+        )
         assigned_points[name] = layer
         original_points[name] = layer.data.copy()
 
@@ -385,25 +404,111 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
 
 
 # ---------------------------
-# Load Points Widget
+# Load Points Widget (robust CSV)
 # ---------------------------
 def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
-    file_edit, combo, button = FileEdit(label="", mode="r", filter="*.csv"), ComboBox(label="Assign to", choices=["Image 1", "Image 2"]), PushButton(text="Load Points")
+    file_edit = FileEdit(label="", mode="r", filter="*.csv")
+    combo = ComboBox(label="Assign to", choices=["Image 1", "Image 2"])
+    button = PushButton(text="Load Points")
+
+    def _read_csv_points(path: Path) -> np.ndarray:
+        """
+        Robust CSV reader:
+        - accepts header or not
+        - delimiters: comma/semicolon/space/tab
+        - columns x,y or y,x (auto by header or heuristic)
+        - returns Nx2 in (y, x) as float32
+        """
+        import csv
+
+        with open(path, "r", newline="") as f:
+            sample = f.read(4096)
+            f.seek(0)
+            sniffer = csv.Sniffer()
+            try:
+                dialect = sniffer.sniff(sample, delimiters=",; \t")
+            except Exception:
+                class _D:
+                    delimiter = ","
+                dialect = _D()
+
+            reader = csv.reader(f, dialect)
+            rows = [r for r in reader if len(r) > 0]
+
+        if not rows:
+            raise ValueError("Empty CSV.")
+
+        has_header = any(any(c.isalpha() for c in cell) for cell in rows[0])
+        data_rows = rows[1:] if has_header else rows
+
+        numeric = []
+        for r in data_rows:
+            vals = []
+            for cell in r:
+                cell = cell.strip()
+                if cell == "":
+                    continue
+                cell = cell.replace(",", ".") if getattr(dialect, "delimiter", ",") != "," else cell
+                try:
+                    vals.append(float(cell))
+                except Exception:
+                    continue
+            if len(vals) >= 2:
+                numeric.append(vals[:3])  # allow optional Z, will be dropped
+
+        if not numeric:
+            raise ValueError("No numeric rows with at least 2 values were found.")
+
+        arr = np.asarray(numeric, dtype=np.float32)
+
+        # By header
+        if has_header:
+            hdr = [h.strip().lower() for h in rows[0]]
+            try:
+                ix = hdr.index("x")
+                iy = hdr.index("y")
+                yx = np.stack([arr[:, iy], arr[:, ix]], axis=1)
+                return yx.astype(np.float32)
+            except ValueError:
+                pass
+
+        # Heuristic
+        if arr.shape[1] >= 2:
+            x_like, y_like = arr[:, 0], arr[:, 1]
+            if np.nanvar(y_like) >= np.nanvar(x_like):
+                yx = np.stack([arr[:, 1], arr[:, 0]], axis=1)
+                return yx.astype(np.float32)
+            else:
+                return arr[:, :2].astype(np.float32)
+
+        raise ValueError("CSV could not be interpreted as 2D points.")
 
     def _on_click(event=None):
         path = file_edit.value
         if not path or not Path(path).exists():
+            print("❌ Select a CSV first.")
             return
-        pts = np.loadtxt(str(path), delimiter=",")
-        if pts.ndim == 1: pts = pts.reshape(1, -1)
-        if pts.shape[1] >= 2:
-            which = combo.value
+
+        try:
+            pts_yx = _read_csv_points(Path(path))  # (N,2) as (y,x)
+            which = combo.value or "Image 1"
             y0, x0 = offsets.get(which, (0, 0))
-            pts[:, 0] += y0; pts[:, 1] += x0
-            layer = viewer.add_points(pts[:, :2], name=f"{which} Points", size=12,
-                                      face_color="red" if which == "Image 1" else "blue", edge_color="black")
+            pts_yx = pts_yx.copy()
+            pts_yx[:, 0] += float(y0)
+            pts_yx[:, 1] += float(x0)
+
+            layer = viewer.add_points(
+                pts_yx,
+                name=f"{which} Points",
+                size=12,
+                face_color="red" if which == "Image 1" else "blue",
+            )
             assigned_points[which] = layer
             original_points[which] = layer.data.copy()
+            print(f"✅ Loaded {pts_yx.shape[0]} points into '{which}'.")
+
+        except Exception as e:
+            print(f"❌ Failed to load points: {e}")
 
     button.clicked.connect(_on_click)
     return Container(widgets=[file_edit, combo, button])
