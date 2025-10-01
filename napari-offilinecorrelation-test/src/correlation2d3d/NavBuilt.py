@@ -115,6 +115,9 @@ def createRecordInNavData(navdata: NavData, item: dict):
         m.NumPts = int(item.get("NumPts", 0))
         m.Regis = int(item.get("Regis", 1))
         m.MapID = int(item.get("MapID", 0))
+
+        if "MapFile" in item:
+            m.MapFile = item["MapFile"]
         if "RawStageXY" in item:
             m.RawStageXY = [float(x) for x in item["RawStageXY"].split()]
         if "MapScaleMat" in item:

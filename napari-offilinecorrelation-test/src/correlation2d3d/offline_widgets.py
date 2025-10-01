@@ -9,11 +9,13 @@ from correlation2d3d import SupportNav as sn
 from qtpy.QtWidgets import QFileDialog
 from napari.viewer import Viewer
 import re
+from pathlib import Path
+from typing import List, Tuple, Optional
+import os
 
 # Global state: linked images and points
 assigned_images = {"Image 1": None, "Image 2": None}
 assigned_points = {"Image 1": None, "Image 2": None}
-
 
 # ---------------------------
 # NAV parsing + reconstruction
@@ -33,6 +35,148 @@ def get_last_item_number(nav_path: str) -> int:
                 last_num = max(last_num, num)
     return last_num
 
+def _normalize_windows_path(s: str) -> str:
+    # strip quotes and normalize slashes
+    s = s.strip().strip('"').strip("'")
+    s = s.replace("\\", "/")
+    return s
+
+def _unique_existing_paths(paths: List[Path]) -> List[Path]:
+    out = []
+    seen = set()
+    for p in paths:
+        try:
+            rp = p.resolve()
+        except Exception:
+            rp = p
+        key = str(rp)
+        if key not in seen and p.exists():
+            seen.add(key)
+            out.append(p)
+        elif key not in seen and not p.exists():
+            # keep non-existing too (search roots), but ensure uniqueness
+            seen.add(key)
+            out.append(p)
+    return out
+
+def _case_insensitive_rglob(root: Path, name: str):
+    """Yield paths in root whose final name matches `name` case-insensitively."""
+    target_lower = name.lower()
+    for p in root.rglob("*"):
+        if p.name.lower() == target_lower and p.is_file():
+            yield p
+
+def _resolve_map_path(
+    nav_path: str,
+    mapfile_field: str,
+    extra_root: Optional[Path] = None,
+    prefix_maps: Optional[List[Tuple[str, Path]]] = None,
+) -> Optional[Path]:
+    """
+    Resolves a MapFile field from a NAV to a local existing file.
+
+    Strategy:
+      1) Exact path after normalization
+      2) Relative to NAV directory
+      3) Apply prefix remaps (e.g., 'X:/RawData/...' -> '/Users/.../CorrelationMatlab/data')
+      4) Case-insensitive filename search in candidate roots
+      5) Stem + common extension search
+    """
+    nav_dir = Path(nav_path).parent
+
+    # --- candidate roots to search (order matters)
+    candidate_roots: List[Path] = []
+    if extra_root:
+        candidate_roots.append(Path(extra_root))
+        candidate_roots.append(Path(extra_root) / "data")
+    candidate_roots.append(nav_dir)
+    candidate_roots.append(nav_dir / "data")
+
+    candidate_roots = _unique_existing_paths(candidate_roots)
+
+    # --- 0) Normalize the incoming field
+    mf_str = _normalize_windows_path(mapfile_field)
+    mf_path = Path(mf_str)
+
+    # --- 1) Exact path as-given
+    if mf_path.is_file():
+        print(f"ℹ Resolved by exact normalized path: {mf_path}")
+        return mf_path
+
+    # --- 2) Treat as relative to NAV directory
+    rel_cand = (nav_dir / mf_path).resolve()
+    if rel_cand.is_file():
+        print(f"ℹ Resolved as path relative to NAV dir: {rel_cand}")
+        return rel_cand
+
+    # --- 3) Apply prefix remaps (Windows → local)
+    # Build default prefix maps if user didn't pass any.
+    # You can add more tuples if you have other drive letters or UNC shares.
+    default_maps: List[Tuple[str, Path]] = []
+    if extra_root:
+        # Common case: map Windows drive prefix to repo/data
+        default_maps.extend([
+            ("X:/RawData/wright/jyang525", Path(extra_root) / "data"),
+            ("X:/RawData", Path(extra_root) / "data"),
+        ])
+    # Accept caller-provided maps and place them before defaults.
+    prefix_maps = (prefix_maps or []) + default_maps
+
+    # Try each prefix map
+    for win_prefix, local_root in prefix_maps:
+        norm_prefix = _normalize_windows_path(win_prefix).rstrip("/")
+        if mf_str.lower().startswith(norm_prefix.lower() + "/"):
+            tail = mf_str[len(norm_prefix) + 1 :]  # path under the prefix
+            remapped = (Path(local_root) / tail).resolve()
+            if remapped.is_file():
+                print(f"ℹ Resolved via prefix map [{win_prefix} -> {local_root}]: {remapped}")
+                return remapped
+            # also try just the filename under that root
+            fname = Path(tail).name
+            direct = (Path(local_root) / fname).resolve()
+            if direct.is_file():
+                print(f"ℹ Resolved via prefix map (filename-only) [{win_prefix} -> {local_root}]: {direct}")
+                return direct
+
+    # --- 4) Case-insensitive filename search across candidate roots
+    target_name = Path(mf_str).name
+    for root in candidate_roots:
+        for hit in _case_insensitive_rglob(root, target_name):
+            print(f"ℹ Resolved by case-insensitive filename search under {root}: {hit}")
+            return hit
+
+    # --- 5) Fallback by stem + common extensions
+    stem = Path(target_name).stem
+    exts = [".st", ".mrc", ".mrcs", ".tif", ".tiff", ".png", ".jpg", ".jpeg"]
+    for root in candidate_roots:
+        for ext in exts:
+            # exact stem match
+            for p in root.rglob(stem + ext):
+                if p.is_file():
+                    print(f"ℹ Resolved by stem+ext under {root}: {p}")
+                    return p
+            # case-insensitive stem match
+            for p in root.rglob(f"*{ext}"):
+                if p.is_file() and Path(p).stem.lower() == stem.lower():
+                    print(f"ℹ Resolved by case-insensitive stem+ext under {root}: {p}")
+                    return p
+
+    print(f"⚠ Could not resolve {target_name} under {[str(r) for r in candidate_roots]}")
+    return None
+
+
+def _read_map_array(map_path: Path) -> np.ndarray:
+    """
+    Read image/volume from disk. Use mrcfile for .st/.mrc/.mrcs, otherwise skimage.io.imread.
+    """
+    suf = map_path.suffix.lower()
+    if suf in {".st", ".mrc", ".mrcs"}:
+        with mrcfile.open(str(map_path), permissive=True) as mrc:
+            data = mrc.data  # could be 2D or 3D
+        return np.asarray(data)
+    else:
+        return io.imread(str(map_path))
+
 def points2nav_widget(viewer: "Viewer") -> Container:
     # GUI widgets
     csv_edit = FileEdit(label="Points CSV", mode="r", filter="*.csv")
@@ -41,6 +185,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
 
     btn_view = PushButton(text="View Points")
     btn_add = PushButton(text="Add Points to NAV")
+    btn_show_map = PushButton(text="Show Map")
 
     # --- Step 1: Load CSV and preview points
     def _on_view(event=None):
@@ -78,7 +223,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             if navdata.Maps:
                 combo._maps = navdata.Maps  # store objects
                 combo.choices = [
-                    f"Map {m.Label} (ID={m.MapID}, Regis={m.Regis})"
+                    f"Map {m.Label} (ID={m.MapID}, Regis={m.Regis}, File={Path(m.MapFile).name if m.MapFile else 'None'})"
                     for m in navdata.Maps
                 ]
                 print(f" Loaded {len(navdata.Maps)} map(s) from {nav_path}")
@@ -118,7 +263,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
         
         map_index = combo.choices.index(combo.value)
         map_item = combo._maps[map_index]
-
+        
         try:
             coords = viewer.layers["Preview Points"].data
         except KeyError:
@@ -175,7 +320,69 @@ def points2nav_widget(viewer: "Viewer") -> Container:
     btn_view.clicked.connect(_on_view)
     btn_add.clicked.connect(_on_add)
 
-    return Container(widgets=[csv_edit, btn_view, nav_edit, combo, btn_add])
+    #return Container(widgets=[csv_edit, btn_view, nav_edit, combo, btn_add])
+
+     # --- Step 4: Show map image from NAV
+    def _on_show_map(event=None):
+        nav_path = nav_edit.value   
+        if not nav_path or not Path(nav_path).exists():
+            print("⚠ Template NAV file not found")
+            return
+        if not hasattr(combo, "_maps") or combo.value is None:
+            print("⚠ No map selected")
+            return
+
+        navdata = nb.parseNavFile(str(nav_path))
+        map_index = combo.choices.index(combo.value)
+        map_item = combo._maps[map_index]
+
+        print(f"DEBUG: map_item.MapFile={map_item.MapFile}")
+        print(f"DEBUG: map_item.Label={map_item.Label}")
+
+        if not map_item.MapFile:
+            print(f"⚠ Selected map {map_item.Label} has no MapFile")
+            return
+
+        # Extract filename only
+        #map_filename = Path(map_item.MapFile).name
+
+        # Resolve path near NAV
+        map_path = _resolve_map_path(
+            nav_path,
+            map_item.MapFile,
+            extra_root=Path("/Users/jyang525/Documents/MATLAB/CorRelator/ER80_G3_TestingInput_3/SmallModuleDevelopment/github_CorrelationMatlab/"),
+            prefix_maps=[
+                ("X:/RawData/wright/jyang525", Path("/Users/jyang525/Documents/MATLAB/CorRelator/.../github_CorrelationMatlab/data")),
+                 # add more if needed
+            ],
+        )
+
+        map_path = _resolve_map_path(nav_path, map_item.MapFile, extra_root=Path("/Users/jyang525/Documents/MATLAB/CorRelator/ER80_G3_TestingInput_3/SmallModuleDevelopment/github_CorrelationMatlab/"))
+        if not map_path:
+            print(f"⚠ Could not locate {Path(map_item.MapFile).name} near {nav_path}")
+            return
+        if map_path.is_dir():
+            print(f"⚠ Resolved map_path is a directory, not a file: {map_path}")
+            return
+        
+        print(f"ℹ Using map file: {map_path}")
+
+        try:
+            arr = _read_map_array(map_path)
+            viewer.add_image(arr, name=f"Map {map_item.Label}")
+            viewer.reset_view()
+            print(f"✅ Loaded map {map_item.Label} from {map_path} | shape={arr.shape}")
+        except Exception as e:
+            print(f"⚠ Failed to read map image from {map_path}: {e}")
+
+
+
+    btn_show_map.clicked.connect(_on_show_map)
+
+    # Return container with all buttons
+    return Container(
+        widgets=[csv_edit, btn_view, nav_edit, combo, btn_add, btn_show_map]
+    )
 
 # ---------------------------
 # Load Images Widget
