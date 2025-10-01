@@ -1,0 +1,16 @@
+name: offlinecorr
+display_name: Offline Correlation
+contributions:
+  commands:
+    - id: offlinecorr.point_transform
+      python_name: offlinecorr.point_transform_widget:FLMTEMPointTransformWidget
+      title: FLM-TEM Point Transform
+    - id: offlinecorr.image_warp
+      python_name: offlinecorr.image_warp_widget:FLMTEMImageWarpWidget
+      title: FLM-TEM Image Warp
+      
+  widgets:
+    - command: offlinecorr.point_transform
+      display_name: Point Transform
+    - command: offlinecorr.image_warp
+      display_name: Image Warp

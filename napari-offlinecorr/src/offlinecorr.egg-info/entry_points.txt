@@ -1,0 +1,2 @@
+[napari.manifest]
+offlinecorr = offlinecorr:napari.yaml

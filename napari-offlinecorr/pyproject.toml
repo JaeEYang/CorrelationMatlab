@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "offlinecorr"
+version = "0.0.0"
+description = "Test plugin for FLM image + registration points"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+dependencies = [
+    "napari",
+    "numpy",
+    "pandas",        # NEW - Added for CSV handling
+    "scipy",         # NEW - Added for image transformations
+    "scikit-image",
+    "qtpy",          # NEW - Added for Qt widgets (may already be included with napari)
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"offlinecorr" = ["napari.yaml"]
+
+[project.entry-points."napari.manifest"]
+offlinecorr = "offlinecorr:napari.yaml"
