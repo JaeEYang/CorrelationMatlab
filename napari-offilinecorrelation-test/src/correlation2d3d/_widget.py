@@ -18,3 +18,4 @@ def serialem_integration_widget():
         Label(value="SerialEM Integration Tools"),
         points2nav_widget(viewer),   
     ])
+

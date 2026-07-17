@@ -53,6 +53,7 @@ class PointItem:
         self.Imported = 0
         self.OrigReg = 0
         self.DrawnID = 0
+        self.MapID = 0
         self.PtsX = 0.0
         self.PtsY = 0.0
 
@@ -64,6 +65,7 @@ class PointItem:
         text.append(f"Regis = {self.Regis}")
         text.append(f"Type = {self.Type}")
         text.append(f"GroupID = {self.GroupID}")
+        text.append(f"MapID = {self.MapID}")
         text.append(f"Imported = {self.Imported}")
         text.append(f"OrigReg = {self.OrigReg}")
         text.append(f"DrawnID = {self.DrawnID}")
@@ -74,10 +76,17 @@ class PointItem:
     def to_dict(self):
         return {
             "Label": self.Label,
+            "Color": self.Color,
             "StageXYZ": self.StageXYZ,
+            "NumPts": self.NumPts,
+            "Regis": self.Regis,
+            "Type": self.Type,
+            "GroupID": self.GroupID,
+            "Imported": self.Imported,
+            "OrigReg": self.OrigReg,
+            "DrawnID": self.DrawnID,
             "PtsX": self.PtsX,
             "PtsY": self.PtsY,
-            "DrawnID": self.DrawnID,
         }
 
 
