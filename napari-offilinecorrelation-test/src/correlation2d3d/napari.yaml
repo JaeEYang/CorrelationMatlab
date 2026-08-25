@@ -11,8 +11,9 @@ contributions:
       title: SerialEM Integration
       python_name: correlation2d3d._widget:serialem_integration_widget
 
+
   widgets:
     - command: correlation-2d-3d.offline
       display_name: Offline Correlation
     - command: correlation-2d-3d.serialem
-      display_name: SerialEM Integration
+      display_name: SerialEM Integration  
