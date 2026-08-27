@@ -43,118 +43,52 @@ def _normalize_windows_path(s: str) -> str:
     s = s.replace("\\", "/")
     return s
 
-def _unique_existing_paths(paths: List[Path]) -> List[Path]:
-    out = []
-    seen = set()
-    for p in paths:
-        try:
-            rp = p.resolve()
-        except Exception:
-            rp = p
-        key = str(rp)
-        if key not in seen and p.exists():
-            seen.add(key)
-            out.append(p)
-        elif key not in seen and not p.exists():
-            # keep non-existing too (search roots), but ensure uniqueness
-            seen.add(key)
-            out.append(p)
-    return out
+def _resolve_map_path(nav_path: str, mapfile_field: str) -> Optional[Path]:
+    """
+    Resolve a NAV MapFile entry to a file on this machine.
 
-def _case_insensitive_rglob(root: Path, name: str):
-    target_lower = name.lower()
-    for p in root.rglob("*"):
-        if p.name.lower() == target_lower and p.is_file():
-            yield p
+    A NAV file records the path from the acquisition machine (typically
+    something like X:\\RawData\\...), which usually does not exist wherever the
+    NAV is later read. Resolution is deliberately limited to two deterministic
+    steps so the outcome is predictable:
 
-def _resolve_map_path(
-    nav_path: str,
-    mapfile_field: str,
-    extra_root: Optional[Path] = None,
-    prefix_maps: Optional[List[Tuple[str, Path]]] = None,
-) -> Optional[Path]:
-   
-    nav_dir = Path(nav_path).parent
+        1. the stored path, exactly as written
+        2. the same filename sitting next to the NAV file
 
-    # --- candidate roots to search (order matters)
-    candidate_roots: List[Path] = []
-    if extra_root:
-        candidate_roots.append(Path(extra_root))
-        candidate_roots.append(Path(extra_root) / "data")
-    candidate_roots.append(nav_dir)
-    candidate_roots.append(nav_dir / "data")
+    Returning None is a normal outcome, not an error: the caller is expected to
+    ask the user to locate the file.
+    """
+    stored = Path(_normalize_windows_path(mapfile_field))
 
-    candidate_roots = _unique_existing_paths(candidate_roots)
+    if stored.is_file():
+        print(f"Map file found at its stored path: {stored}")
+        return stored
 
-    # --- 0) Normalize the incoming field
-    mf_str = _normalize_windows_path(mapfile_field)
-    mf_path = Path(mf_str)
+    beside_nav = Path(nav_path).parent / stored.name
+    if beside_nav.is_file():
+        print(f"Map file found next to the NAV file: {beside_nav}")
+        return beside_nav
 
-    # --- 1) Exact path as-given
-    if mf_path.is_file():
-        print(f"ℹ Resolved by exact normalized path: {mf_path}")
-        return mf_path
-
-    # --- 2) Treat as relative to NAV directory
-    rel_cand = (nav_dir / mf_path).resolve()
-    if rel_cand.is_file():
-        print(f"ℹ Resolved as path relative to NAV dir: {rel_cand}")
-        return rel_cand
-
-    # --- 3) Apply prefix remaps (Windows → local)
-    # Build default prefix maps if user didn't pass any.
-    # You can add more tuples if you have other drive letters or UNC shares.
-    default_maps: List[Tuple[str, Path]] = []
-    if extra_root:
-        # Common case: map Windows drive prefix to repo/data
-        default_maps.extend([
-            ("X:/RawData/wright/jyang525", Path(extra_root) / "data"),
-            ("X:/RawData", Path(extra_root) / "data"),
-        ])
-    # Accept caller-provided maps and place them before defaults.
-    prefix_maps = (prefix_maps or []) + default_maps
-
-    # Try each prefix map
-    for win_prefix, local_root in prefix_maps:
-        norm_prefix = _normalize_windows_path(win_prefix).rstrip("/")
-        if mf_str.lower().startswith(norm_prefix.lower() + "/"):
-            tail = mf_str[len(norm_prefix) + 1 :]  # path under the prefix
-            remapped = (Path(local_root) / tail).resolve()
-            if remapped.is_file():
-                print(f"ℹ Resolved via prefix map [{win_prefix} -> {local_root}]: {remapped}")
-                return remapped
-            # also try just the filename under that root
-            fname = Path(tail).name
-            direct = (Path(local_root) / fname).resolve()
-            if direct.is_file():
-                print(f"ℹ Resolved via prefix map (filename-only) [{win_prefix} -> {local_root}]: {direct}")
-                return direct
-
-    # --- 4) Case-insensitive filename search across candidate roots
-    target_name = Path(mf_str).name
-    for root in candidate_roots:
-        for hit in _case_insensitive_rglob(root, target_name):
-            print(f"ℹ Resolved by case-insensitive filename search under {root}: {hit}")
-            return hit
-
-    # --- 5) Fallback by stem + common extensions
-    stem = Path(target_name).stem
-    exts = [".st", ".mrc", ".mrcs", ".tif", ".tiff", ".png", ".jpg", ".jpeg"]
-    for root in candidate_roots:
-        for ext in exts:
-            # exact stem match
-            for p in root.rglob(stem + ext):
-                if p.is_file():
-                    print(f"ℹ Resolved by stem+ext under {root}: {p}")
-                    return p
-            # case-insensitive stem match
-            for p in root.rglob(f"*{ext}"):
-                if p.is_file() and Path(p).stem.lower() == stem.lower():
-                    print(f"ℹ Resolved by case-insensitive stem+ext under {root}: {p}")
-                    return p
-
-    print(f"⚠ Could not resolve {target_name} under {[str(r) for r in candidate_roots]}")
+    print(f"Could not locate {stored.name} automatically; asking the user.")
     return None
+
+
+def _prompt_for_map_file(expected_name: str, start_dir: Optional[Path] = None) -> Optional[Path]:
+    """
+    Ask the user to locate a map file we could not resolve.
+
+    Returns None if the user cancels, which callers must treat as "do nothing"
+    rather than as an error.
+    """
+    chosen, _ = QFileDialog.getOpenFileName(
+        None,
+        f"Locate {expected_name}",
+        str(start_dir) if start_dir else "",
+        "Map images (*.st *.mrc *.mrcs *.tif *.tiff *.png *.jpg *.jpeg);;All files (*)",
+    )
+    if not chosen:
+        return None
+    return Path(chosen)
 
 
 def _read_map_array(map_path: Path) -> np.ndarray:
@@ -313,19 +247,17 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             print("no map selected")
             return
 
-        map_path = _resolve_map_path(
-            nav_path,
-            map_item.MapFile,
-            extra_root=Path("/Users/jyang525/Documents/MATLAB/CorRelator/ER80_G3_TestingInput_3/SmallModuleDevelopment/github_CorrelationMatlab/"),
-            prefix_maps=[
-                ("X:/RawData/wright/jyang525", Path("/Users/jyang525/Documents/MATLAB/CorRelator/.../github_CorrelationMatlab/data")),
-                 # add more if needed
-            ],
-        )
+        # Use the path stored in the NAV if it exists; otherwise ask the user to
+        # locate the file. NAV files carry acquisition-machine paths, so on any
+        # other machine the prompt is the normal route rather than an error case.
+        map_path = _resolve_map_path(nav_path, map_item.MapFile)
 
-        if not map_path:
-            print(f"⚠ Could not locate {Path(map_item.MapFile).name} near {nav_path}")
-            return
+        if map_path is None:
+            expected_name = Path(_normalize_windows_path(map_item.MapFile)).name
+            map_path = _prompt_for_map_file(expected_name, start_dir=Path(nav_path).parent)
+            if map_path is None:
+                print(f"Cancelled: {expected_name} was not located.")
+                return
         if map_path.is_dir():
             print(f"⚠ Resolved map_path is a directory, not a file: {map_path}")
             return
