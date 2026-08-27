@@ -866,6 +866,9 @@ def points2nav_widget(viewer: "Viewer") -> Container:
 # Montage testing
 # ---------------------------
 
+# LEGACY - migrate to serialem/montage.py.
+# Currently unused after removal of the broken Offline NAV loader.
+# Retained as reference for future montage reconstruction.
 def reconstruct_from_nav(mrc_path: Path, coords):
     """Reconstruct montage from NAV coords."""
     with mrcfile.open(str(mrc_path), permissive=True) as mrc:
@@ -1047,7 +1050,6 @@ def rotate_points_fixed(points, angle, shape):
 # ---------------------------
 def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
     mrc_edit = FileEdit(label="Image File", mode="r", filter="*.mrc *.st *.tif *.tiff *.png *.jpg")
-    nav_edit = FileEdit(label="Navigator file(*.nav)", mode="r", filter="*.nav")
     button = PushButton(text="Load Images")
 
     # toggle: decide if we also show raw stack (default: False to avoid confusion)
@@ -1055,7 +1057,6 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
 
     def _on_click(event=None):
         mrc_path = mrc_edit.value
-        nav_path = nav_edit.value
 
         if not mrc_path or not Path(mrc_path).exists():
             print("❌ Please select an MRC/ST or image file")
@@ -1113,23 +1114,8 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
                 viewer.add_image(canvas, name=f"{name} [image]")
             offsets["Image 1"] = offset
 
-        # --- Optional NAV parsing (legacy) ---
-        if nav_path and Path(nav_path).exists():
-            maps, _ = parse_nav(nav_path)
-            if maps:
-                for mid, info in maps.items():
-                    try:
-                        mrc_file = Path(nav_path).parent / info["file"]
-                        if not mrc_file.exists():
-                            continue
-                        mosaic = reconstruct_from_nav(mrc_file, info["coords"])
-                        mosaic_canvas, _ = prepare_canvas(mosaic)
-                        viewer.add_image(mosaic_canvas, name=f"Montage Map {mid}", colormap="gray")
-                    except Exception as e:
-                        print(f"⚠️ Failed NAV montage {mid}: {e}")
-
     button.clicked.connect(_on_click)
-    return Container(widgets=[mrc_edit, nav_edit, button])
+    return Container(widgets=[mrc_edit, button])
 
 
 # ---------------------------
