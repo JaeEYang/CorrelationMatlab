@@ -1,5 +1,16 @@
 # CorrelationMatlab
 
+A cryo-CLEM correlation workflow, moving from MATLAB to a napari application with
+SerialEM integration.
+
+- **`napari-offilinecorrelation-test/`** — the napari plugin (active development).
+  See [environment.yml](./environment.yml) for the development environment.
+- **`matlab/`** — the original MATLAB tool, now a
+  [frozen reference implementation](./matlab/README.md). It is being retired and
+  is kept only to define golden outputs for the Python port.
+
+## MATLAB reference tool (frozen)
+
 ### Requirements
 - MATLAB R2020a or newer
 - Image Processing Toolbox
@@ -7,7 +18,7 @@
 
 ### Installation
 1. Install required software
-2. Run MATLAB main script OfflineCorrelationGUI.m
+2. Run MATLAB main script [matlab/OfflineCorrelationGUI.m](./matlab/OfflineCorrelationGUI.m)
 3. Use the test data here:
    - [data/](./data/)
    - [Sample FLM](./data/X7Y6_FLM_RGB_2.tif)
