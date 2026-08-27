@@ -1,0 +1,25 @@
+# Development environment for the cryo-CLEM correlation application.
+#
+#   conda env create -f environment.yml
+#   conda activate correlation-napari
+#   pip install -e napari-offilinecorrelation-test[test]
+#
+# Versions are pinned to minor because the UI layer depends on napari's
+# multi-window behaviour (napari.Viewer instances are tracked in
+# _QtMainWindow._instances), which is not covered by a stability guarantee.
+name: correlation-napari
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - napari=0.6.4
+  - pyqt=5
+  - numpy=2.4.*
+  - scipy=1.17.*
+  - scikit-image=0.26.*
+  - magicgui=0.10.*
+  - qtpy=2.4.*
+  - pytest
+  - pip
+  - pip:
+      - mrcfile==1.5.4

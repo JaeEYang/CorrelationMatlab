@@ -14,8 +14,16 @@ requires-python = ">=3.9"
 dependencies = [
   "napari",
   "numpy",
+  "scipy",
   "scikit-image",
-  "mrcfile"
+  "mrcfile",
+  "magicgui",
+  "qtpy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
 ]
 
 [tool.setuptools.packages.find]
