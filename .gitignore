@@ -10,3 +10,6 @@ __pycache__/
 
 # Test tooling
 .pytest_cache/
+
+# Large local microscope test data (kept outside regular Git)
+data/Testing_Data_01/Data/82map_2.st
