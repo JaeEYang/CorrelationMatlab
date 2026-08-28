@@ -89,7 +89,7 @@ def matrixMultiply(mat1, mat2):
 def computeMsFLM(flm_points: np.ndarray, tem_points: np.ndarray) -> np.ndarray:
     """
     Compute the affine transform MsFLM (3x3) that maps FLM pixel coords to TEM pixel coords.
-    Requires ≥3 corresponding points.
+    Requires >=3 corresponding points.
     """
     if flm_points.shape != tem_points.shape or flm_points.shape[0] < 3:
         raise ValueError("FLM and TEM points must have the same shape and at least 3 points")
@@ -114,12 +114,12 @@ def pixel_to_stage_o(map_item, x_pix: float, y_pix: float) -> np.ndarray:
       - RawStageXY: reference stage position of the map center
 
     The formula follows SerialEM convention:
-        stage_xy = RawStageXY + (MapScaleMat_in_µm × ( [x_pix, y_pix] - image_center ))
+        stage_xy = RawStageXY + (MapScaleMat_in_um x ( [x_pix, y_pix] - image_center ))
     """
-    # 2×2 MapScaleMat in nm/pixel
+    # 2x2 MapScaleMat in nm/pixel
     mat_nm = np.array(map_item.MapScaleMat, dtype=float)
 
-    # Convert to µm/pixel
+    # Convert to um/pixel
     mat_um = mat_nm * 0.01
 
     # Image center

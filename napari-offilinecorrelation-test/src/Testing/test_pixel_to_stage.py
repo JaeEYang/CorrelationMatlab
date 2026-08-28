@@ -18,8 +18,8 @@ def pixel_to_stage_debug(map_item, x_pix: float, y_pix: float) -> np.ndarray:
     Convert pixel coords (X, Y) to stage coords using SerialEM convention.
     """
     mat_nm = np.array(map_item["MapScaleMat"], dtype=float)
-    # MapScaleMat is in nm/pixel. Convert to µm/pixel.
-    mat_um = mat_nm * 0.01   # adjust factor if needed (0.01 for nm→µm)
+    # MapScaleMat is in nm/pixel. Convert to um/pixel.
+    mat_um = mat_nm * 0.01   # adjust factor if needed (0.01 for nm->um)
 
     center = map_item["MapWidthHeight"] / 2.0
     pix_vec = np.array([x_pix, y_pix], dtype=float) - center
@@ -54,9 +54,9 @@ def run_test():
         sx_calc, sy_calc = stage_xy
 
         print(f"[Point {i}] Pixel (X={x_pix}, Y={y_pix})")
-        print(f"  → Computed stage (X={sx_calc:.2f}, Y={sy_calc:.2f})")
-        print(f"  → Expected stage (X={sx_exp:.2f}, Y={sy_exp:.2f})")
-        print(f"  → Δ error (X={sx_calc - sx_exp:.2f}, Y={sy_calc - sy_exp:.2f})\n")
+        print(f"  -> Computed stage (X={sx_calc:.2f}, Y={sy_calc:.2f})")
+        print(f"  -> Expected stage (X={sx_exp:.2f}, Y={sy_exp:.2f})")
+        print(f"  -> delta error (X={sx_calc - sx_exp:.2f}, Y={sy_calc - sy_exp:.2f})\n")
 
 
 if __name__ == "__main__":

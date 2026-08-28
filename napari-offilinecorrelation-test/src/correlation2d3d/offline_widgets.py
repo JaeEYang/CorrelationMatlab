@@ -167,7 +167,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
     #---Newly added--ending
 
     btn_show_map = PushButton(text="Show Map")
-        # --- Optional registration files (FLM ↔ TEM)
+        # --- Optional registration files (FLM <-> TEM)
     flm_reg_pts_edit = FileEdit(
         label="FLM Registration Points (CSV)",
         mode="r",
@@ -191,6 +191,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
     btn_view = PushButton(text="View Points")
     btn_view_flm = PushButton(text="Preview FLM regPoints")
     btn_view_tem = PushButton(text="Preview TEM regPoints")
+    # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
     btn_warp = PushButton(label="Transform FLM → TEM")
     #btn_add = PushButton(text="Add Points to NAV")
     btn_add = PushButton(text="Add Points to NAV (queue)")
@@ -239,7 +240,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
     def _on_show_map(event=None):
         nav_path = nav_edit.value   
         if not nav_path or not Path(nav_path).exists():
-            print("⚠ Template NAV file not found")
+            print("WARNING: Template NAV file not found")
             return
 
         map_item = get_selected_map(combo_1)
@@ -259,28 +260,28 @@ def points2nav_widget(viewer: "Viewer") -> Container:
                 print(f"Cancelled: {expected_name} was not located.")
                 return
         if map_path.is_dir():
-            print(f"⚠ Resolved map_path is a directory, not a file: {map_path}")
+            print(f"WARNING: Resolved map_path is a directory, not a file: {map_path}")
             return
         
-        print(f"ℹ Using map file: {map_path}")
+        print(f"INFO: Using map file: {map_path}")
 
         try:
             mdoc_path = Path(str(map_path) + ".mdoc")
             is_montage = mdoc_path.exists()
             if is_montage:
-                print(f"ℹ Found MDOC file: {mdoc_path}")
+                print(f"INFO: Found MDOC file: {mdoc_path}")
                 try:
                     arr = reconstruct_mdoc_montage(map_path, mdoc_path) #Use the function to display montage
-                    print(f"✅ Reconstructed montage from MDOC | shape={arr.shape}")
+                    print(f"OK: Reconstructed montage from MDOC | shape={arr.shape}")
                 except Exception as e:
-                    print(f"⚠ Failed MDOC reconstruction, falling back to raw stack: {e}")
+                    print(f"WARNING: Failed MDOC reconstruction, falling back to raw stack: {e}")
                     arr = _read_map_array(map_path)
                     is_montage = False
 
             else:
-                # 2) No MDOC → fallback to raw reading
+                # 2) No MDOC -> fallback to raw reading
                 arr = _read_map_array(map_path)
-                print(f"ℹ Loaded raw map image | shape={arr.shape}")
+                print(f"INFO: Loaded raw map image | shape={arr.shape}")
 
             # ---------------------------------------------
             # Display reconstructed or raw image
@@ -296,17 +297,17 @@ def points2nav_widget(viewer: "Viewer") -> Container:
                 offsets[layer_name] = offset
                 layer = viewer.add_image(canvas, name=layer_name, colormap="gray")
                 layer.translate = np.array([offset[0], offset[1]])
-                print(f"⭐ Montage displayed. Offset={offset}")
+                print(f"INFO: Montage displayed. Offset={offset}")
             else:
                 offsets[layer_name] = (0, 0)
                 layer = viewer.add_image(arr, name=layer_name, colormap="gray")
-                print("⭐ Non-montage image displayed. No offset applied.")
+                print("INFO: Non-montage image displayed. No offset applied.")
 
             viewer.camera.center = (
                 layer.extent.world[0]
                 + (layer.extent.world[1] - layer.extent.world[0]) / 2
             )
-            print(f"✅ Loaded map {map_item.Label} from {map_path}")
+            print(f"OK: Loaded map {map_item.Label} from {map_path}")
 
             ## temporiraly added for testing
             sx, sy = map_item.StageXYZ[:2]
@@ -315,12 +316,12 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             print(f"  original stage : ({sx:.6f}, {sy:.6f})")
             print(f"  pixel coords   : ({xp:.6f}, {yp:.6f})")
             print(f"  recovered stage: ({sx2:.6f}, {sy2:.6f})")
-            print(f"  Δstage         : ({sx2 - sx:.3e}, {sy2 - sy:.3e})")
+            print(f"  delta stage    : ({sx2 - sx:.3e}, {sy2 - sy:.3e})")
 
         except Exception as e:
-            print(f"⚠ Failed to read map image from {map_path}: {e}")
+            print(f"WARNING: Failed to read map image from {map_path}: {e}")
             return
-        print(">>> REACHED END OF SHOW MAP — ENABLE UI")
+        print(">>> REACHED END OF SHOW MAP -- ENABLE UI")
 
         # testing on map coordinates
         corners = _test_map_corners(map_item)
@@ -360,7 +361,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
         for i, (sx, sy) in enumerate(corners_stage):
             xpix, ypix = _stage_to_pixel(map_item, sx, sy)
             corners_pix.append([ypix, xpix])
-            print(f"Corner {i}: stage=({sx:.3f}, {sy:.3f}) → pixel=({xpix:.1f}, {ypix:.1f})")
+            print(f"Corner {i}: stage=({sx:.3f}, {sy:.3f}) -> pixel=({xpix:.1f}, {ypix:.1f})")
         
         return np.array(corners_pix, dtype=float)
 
@@ -378,7 +379,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             import re
             m = re.search(r"GroupID\s*=\s*(-?\d+)", group_label)
             if not m:
-                print(f"⚠ Could not parse GroupID from '{group_label}'")
+                print(f"WARNING: Could not parse GroupID from '{group_label}'")
                 return
             gid = int(m.group(1))
             print(f"Selected GroupID = {gid}")
@@ -431,7 +432,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             print(" CSV must have at least 2 columns (X,Y)")
             return
         
-        # Convert [X, Y] → [Y, X] for napari display
+        # Convert [X, Y] -> [Y, X] for napari display
         pts = coords[:, [1, 0]].copy()  
       
         if "Preview Points" in viewer.layers:
@@ -449,7 +450,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
 
     def _load_and_display_csv(csv_path, layer_label):
         if not csv_path or not Path(csv_path).exists():
-            print(f"⚠ CSV file not found for {layer_label}")
+            print(f"WARNING: CSV file not found for {layer_label}")
             return
         with open(csv_path, 'r', encoding='utf-8-sig') as f:
             lines = [line for line in f if line.strip()]
@@ -458,7 +459,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
         if coords.ndim == 1:
             coords = coords.reshape(1, -1)
         if coords.shape[1] < 2:
-             print(f"⚠ {layer_label}: CSV must have at least 2 columns (X,Y)")
+             print(f"WARNING: {layer_label}: CSV must have at least 2 columns (X,Y)")
              return
         
         pts = coords[:, [1, 0]]
@@ -533,7 +534,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
 
         N = flm_pts.shape[0]
 
-        # Build 3×N homogeneous coordinate matrices (COLUMN VECTORS)
+        # Build 3xN homogeneous coordinate matrices (COLUMN VECTORS)
         P = np.vstack([
             flm_pts[:, 0],          # x_f
             flm_pts[:, 1],          # y_f
@@ -548,7 +549,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
 
         rank = np.linalg.matrix_rank(P)
         if rank < 3:
-            print(f"⚠ Registration points are rank-deficient (rank={rank}); using pseudoinverse fit.")
+            print(f"WARNING: Registration points are rank-deficient (rank={rank}); using pseudoinverse fit.")
         # Compute the column-based least-squares transform
         #M_col = Q @ P.T @ np.linalg.inv(P @ P.T)   # shape (3, 3), strict affine shape
         M_col = Q @ P.T @ np.linalg.pinv(P @ P.T)   # proper for interactive layers
@@ -569,7 +570,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             flm_pts_yx = flm_layer.data[:, :2].copy()
             tem_pts_yx = tem_layer.data[:, :2].copy()
             if flm_pts_yx.shape != tem_pts_yx.shape or flm_pts_yx.shape[0] < 3:
-                raise ValueError("Point layers must have same number of points (≥3)")
+                raise ValueError("Point layers must have same number of points (>=3)")
             print("Using registration points from napari point layers")
             source = "layers"
 
@@ -582,7 +583,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             flm_raw = np.loadtxt(flm_path, delimiter=",")
             tem_raw = np.loadtxt(tem_path, delimiter=",")
             if flm_raw.shape != tem_raw.shape or flm_raw.shape[0] < 3:
-                raise ValueError("CSV registration files must match and have ≥3 points")
+                raise ValueError("CSV registration files must match and have >=3 points")
             
             flm_pts_yx = flm_raw[:, :2][:, ::-1]
             tem_pts_yx = tem_raw[:, :2][:, ::-1]
@@ -645,7 +646,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
         try:
             flm_pts, tem_pts, _ = _resolve_registration_points()
         except Exception as e:
-            print(f"⚠ {e}")
+            print(f"WARNING: {e}")
             return
   
         try:
@@ -672,19 +673,19 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             print(f"Residual (px)  : ({pred[0]-xt:.3e}, {pred[1]-yt:.3e})")
 
         except Exception as e:
-            print(f"⚠ Failed to compute MsFLM: {e}")
+            print(f"WARNING: Failed to compute MsFLM: {e}")
             return
 
         flm_layer_name = flm_image_combo.value
         tem_layer_name = tem_image_combo.value
 
         if flm_layer_name not in viewer.layers:
-            print(f"⚠ FLM layer '{flm_layer_name}' is not loaded.")
+            print(f"WARNING: FLM layer '{flm_layer_name}' is not loaded.")
             return
         flm_image = viewer.layers[flm_layer_name].data
         
         if tem_layer_name not in viewer.layers:
-            print(f"⚠ TEM layer '{tem_layer_name}' not found.")
+            print(f"WARNING: TEM layer '{tem_layer_name}' not found.")
             return
         tem_image = viewer.layers[tem_layer_name].data
 
@@ -808,7 +809,7 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             None, "Save Output NAV", "output.nav", "NAV Files (*.nav)"
         )
         if not out_path:
-            print("⚠ Save cancelled")
+            print("WARNING: Save cancelled")
             return
         
         # Write out new NAV
@@ -997,7 +998,7 @@ def reconstruct_mdoc_montage(st_path: Path, mdoc_path: Path):
         tile_y_end = tile_y_start + (y_end - y_start)
 
         if x_end <= x_start or y_end <= y_start:
-            print(f"⚠️ Skipping tile {i}: completely out of bounds at ({x},{y})")
+            print(f"WARNING: Skipping tile {i}: completely out of bounds at ({x},{y})")
             continue
 
         if nch is None:
@@ -1059,7 +1060,7 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
         mrc_path = mrc_edit.value
 
         if not mrc_path or not Path(mrc_path).exists():
-            print("❌ Please select an MRC/ST or image file")
+            print("ERROR: Please select an MRC/ST or image file")
             return
 
         ext = Path(mrc_path).suffix.lower()
@@ -1071,7 +1072,7 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
                 with mrcfile.open(str(mrc_path), permissive=True) as mrc:
                     raw = np.copy(mrc.data)
             except Exception as e:
-                print(f"⚠️ Failed to open stack: {e}")
+                print(f"WARNING: Failed to open stack: {e}")
                 return
 
             # try .mdoc montage
@@ -1124,6 +1125,7 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
 def make_image_panel(viewer, name: str = "Image 1") -> Container:
     combo = ComboBox(label=f"Select {name}", choices=lambda *a: [l.name for l in viewer.layers if isinstance(l, Image)])
     label = Label(value=f"{name}: None")
+    # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
     clear_btn, angle_slider = PushButton(text="Clear"), Slider(min=0, max=360, step=1, value=0, label="Rotate °")
     flipv_btn, fliph_btn, new_pts_btn = PushButton(text="Flip V"), PushButton(text="Flip H"), PushButton(text="New Points Layer")
 
@@ -1276,7 +1278,7 @@ def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
     def _on_click(event=None):
         path = file_edit.value
         if not path or not Path(path).exists():
-            print("❌ Select a CSV first.")
+            print("ERROR: Select a CSV first.")
             return
 
         try:
@@ -1295,10 +1297,10 @@ def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
             )
             assigned_points[which] = layer
             original_points[which] = layer.data.copy()
-            print(f"✅ Loaded {pts_yx.shape[0]} points into '{which}'.")
+            print(f"OK: Loaded {pts_yx.shape[0]} points into '{which}'.")
 
         except Exception as e:
-            print(f"❌ Failed to load points: {e}")
+            print(f"ERROR: Failed to load points: {e}")
 
     button.clicked.connect(_on_click)
     return Container(widgets=[file_edit, combo, button])
