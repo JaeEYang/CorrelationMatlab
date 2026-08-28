@@ -13,7 +13,7 @@ reference material** and is being retired.
 `OfflineCorrelationGUI.m` — the tool as shipped. Its six steps define the offline
 workflow the Python application must reach parity with:
 
-| Step | Function | Python replacement |
+| Step | Function | Planned Python replacement |
 |---|---|---|
 | Load FLM image + points | `loadImage.m`, `loadCSV.m` | `io/images.py`, `io/points_csv.py` |
 | Load TEM image + points | same | same |

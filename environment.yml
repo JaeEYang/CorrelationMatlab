@@ -2,7 +2,7 @@
 #
 #   conda env create -f environment.yml
 #   conda activate correlation-napari
-#   pip install -e napari-offilinecorrelation-test[test]
+#   pip install -e "napari-offilinecorrelation-test[test]"
 #
 # Versions are pinned to minor because the UI layer depends on napari's
 # multi-window behaviour (napari.Viewer instances are tracked in
