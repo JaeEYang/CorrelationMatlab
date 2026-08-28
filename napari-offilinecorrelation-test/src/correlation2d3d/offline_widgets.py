@@ -1,5 +1,5 @@
 import numpy as np
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from magicgui.widgets import FileEdit, PushButton, ComboBox, Container, Label, Slider
 import mrcfile
 from skimage import io
@@ -22,6 +22,10 @@ original_images = {}
 original_points = {"Image 1": None, "Image 2": None}
 offsets = {"Image 1": (0, 0), "Image 2": (0, 0)}
 
+# Session-only relocation hints learned after the user explicitly locates a
+# missing Navigator map. Nothing is written to disk or committed to the repo.
+_map_directory_remaps: dict[str, Path] = {}
+
 
 # ---------------------------
 # NAV parsing
@@ -43,6 +47,113 @@ def _normalize_windows_path(s: str) -> str:
     s = s.replace("\\", "/")
     return s
 
+
+def _map_source_directory(nav_path: str, mapfile_field: str) -> str:
+    """
+    Return a stable session-cache key for a NAV MapFile directory.
+
+    MapFile comes in three shapes, and each one anchors somewhere different:
+
+        X:/RawData/session/map.st  ->  x:/rawdata/session   acquisition machine
+        map.st                     ->  the NAV's directory
+        maps/map.st                ->  the NAV's directory + maps
+
+    Every branch ends in as_posix() before the casefold below, so two shapes
+    that name the same directory produce one key rather than differing only in
+    separator style. Anchoring the relative shape at the NAV file keeps a bare
+    "maps" from merging unrelated NAV files onto a single entry.
+
+    MapFile is always written by SerialEM on Windows, so the stored value is
+    parsed as a Windows path regardless of the host: Path("X:/...").is_absolute()
+    answers False off Windows, which would file acquisition paths as relative.
+    """
+    stored = PureWindowsPath(_normalize_windows_path(mapfile_field))
+    parent = stored.parent
+    nav_directory = Path(nav_path).resolve().parent
+
+    if str(parent) in {"", "."}:
+        source_directory = nav_directory.as_posix()
+    elif parent.is_absolute():
+        source_directory = parent.as_posix()
+    else:
+        source_directory = (nav_directory / parent.as_posix()).as_posix()
+
+    return source_directory.rstrip("/").casefold()
+
+
+def _remember_map_directory(
+    nav_path: str,
+    mapfile_field: str,
+    selected_map: Path,
+) -> bool:
+    """
+    Remember a relocation only when the explicitly selected filename matches.
+
+    A differently named file can still be used for the current map, but it does
+    not provide enough evidence to infer where sibling Navigator maps live.
+    """
+    selected_map = Path(selected_map)
+    expected_name = Path(_normalize_windows_path(mapfile_field)).name
+    if (
+        not selected_map.is_file() # does it exist as a regular file ?
+        or selected_map.name.casefold() != expected_name.casefold() # does the name match the NAV entry ?
+    ):
+        return False
+
+    source_directory = _map_source_directory(nav_path, mapfile_field)
+    _map_directory_remaps[source_directory] = selected_map.parent
+    print(
+        "Remembered map directory for this session: "
+        f"{source_directory} -> {selected_map.parent}"
+    )
+    return True
+
+
+def _resolve_remembered_map_path(nav_path: str, mapfile_field: str) -> Optional[Path]:
+    """
+    Resolve a map through a directory relocation learned in this session.
+
+    An exact filename match wins outright. Failing that, reuse is automatic
+    only when exactly one case-insensitive match is present; zero or multiple
+    matches return None so the UI asks the user again.
+    """
+    source_directory = _map_source_directory(nav_path, mapfile_field)
+    local_directory = _map_directory_remaps.get(source_directory)
+    if local_directory is None or not local_directory.is_dir():
+        return None
+
+    expected_name = Path(_normalize_windows_path(mapfile_field)).name
+
+    direct = local_directory / expected_name
+    if direct.is_file():
+        print(f"Map file found through the session relocation: {direct}")
+        return direct
+
+    # Only a case-sensitive filesystem reaches the scan below, and a montage
+    # directory can hold thousands of tiles, so it stays off the common path.
+    try:
+        matches = [
+            candidate
+            for candidate in local_directory.iterdir()
+            if candidate.is_file()
+            and candidate.name.casefold() == expected_name.casefold()
+        ]
+    except OSError as error:
+        print(f"Could not read remembered map directory {local_directory}: {error}")
+        return None
+
+    if len(matches) == 1:
+        print(f"Map file found through the session relocation: {matches[0]}")
+        return matches[0]
+
+    if len(matches) > 1:
+        print(
+            f"Multiple files match {expected_name} in {local_directory}; "
+            "asking the user to choose one."
+        )
+    return None
+
+
 def _resolve_map_path(nav_path: str, mapfile_field: str) -> Optional[Path]:
     """
     Resolve a NAV MapFile entry to a file on this machine.
@@ -55,21 +166,32 @@ def _resolve_map_path(nav_path: str, mapfile_field: str) -> Optional[Path]:
         1. the stored path, exactly as written
         2. the same filename sitting next to the NAV file
 
+    A MapFile written relative to the NAV file, such as maps\\map.st, is
+    anchored at the NAV directory for step 1. Anchoring it at the process
+    working directory instead would make the outcome depend on where napari
+    happened to be launched from.
+
     Returning None is a normal outcome, not an error: the caller is expected to
     ask the user to locate the file.
     """
-    stored = Path(_normalize_windows_path(mapfile_field))
+    stored = PureWindowsPath(_normalize_windows_path(mapfile_field))
+    nav_directory = Path(nav_path).resolve().parent
 
-    if stored.is_file():
-        print(f"Map file found at its stored path: {stored}")
-        return stored
+    if stored.is_absolute():
+        candidate = Path(stored.as_posix())
+    else:
+        candidate = nav_directory / stored.as_posix()
 
-    beside_nav = Path(nav_path).parent / stored.name
+    if candidate.is_file():
+        print(f"Map file found at its stored path: {candidate}")
+        return candidate
+
+    beside_nav = nav_directory / stored.name
     if beside_nav.is_file():
         print(f"Map file found next to the NAV file: {beside_nav}")
         return beside_nav
 
-    print(f"Could not locate {stored.name} automatically; asking the user.")
+    print(f"Could not locate {stored.name} in the stored or NAV directory.")
     return None
 
 
@@ -248,10 +370,11 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             print("no map selected")
             return
 
-        # Use the path stored in the NAV if it exists; otherwise ask the user to
-        # locate the file. NAV files carry acquisition-machine paths, so on any
-        # other machine the prompt is the normal route rather than an error case.
+        # Resolve deterministic locations first, then try a relocation learned
+        # from an earlier explicit choice in this application session.
         map_path = _resolve_map_path(nav_path, map_item.MapFile)
+        if map_path is None:
+            map_path = _resolve_remembered_map_path(nav_path, map_item.MapFile)
 
         if map_path is None:
             expected_name = Path(_normalize_windows_path(map_item.MapFile)).name
@@ -259,6 +382,11 @@ def points2nav_widget(viewer: "Viewer") -> Container:
             if map_path is None:
                 print(f"Cancelled: {expected_name} was not located.")
                 return
+            if not _remember_map_directory(nav_path, map_item.MapFile, map_path):
+                print(
+                    f"Using {map_path.name} for this map only; its filename does "
+                    f"not match the NAV entry {expected_name}."
+                )
         if map_path.is_dir():
             print(f"WARNING: Resolved map_path is a directory, not a file: {map_path}")
             return
