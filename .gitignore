@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 ._*
 *.egg-info/
+
+# Test tooling
+.pytest_cache/
