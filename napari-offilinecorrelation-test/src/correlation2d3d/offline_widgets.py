@@ -27,6 +27,19 @@ offsets = {"Image 1": (0, 0), "Image 2": (0, 0)}
 _map_directory_remaps: dict[str, Path] = {}
 
 
+# give every image layer a way to store and retrieve its own canvas offset
+def _set_canvas_offset(layer,offset):
+    canvas_offset = tuple(offset) # stored representation is always tuple
+    layer.metadata["canvas_offset"] = canvas_offset
+    offsets[layer.name]=canvas_offset 
+
+
+def _get_canvas_offset(layer):
+    if layer is None:
+        return (0,0)
+    if "canvas_offset" in layer.metadata:
+        return tuple(layer.metadata["canvas_offset"])
+    return tuple(offsets.get(layer.name,(0,0)))
 # ---------------------------
 # NAV parsing
 # ---------------------------
@@ -722,9 +735,12 @@ def points2nav_widget(viewer: "Viewer") -> Container:
         tem_img_name = tem_image_combo.value
         if not flm_img_name or not tem_img_name:
             raise ValueError("Select FLM and TEM image layers first")
+
+        flm_layer = viewer.layers[flm_img_name]
+        tem_layer = viewer.layers[tem_img_name]
         
-        y0f, x0f = offsets.get(flm_img_name, (0, 0))
-        y0t, x0t = offsets.get(tem_img_name, (0, 0))
+        y0f, x0f = _get_canvas_offset(flm_layer)
+        y0t, x0t = _get_canvas_offset(tem_layer)
 
         flm_pts_yx[:, 0] -= y0f
         flm_pts_yx[:, 1] -= x0f
@@ -1214,8 +1230,8 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
 
             if montage is not None:
                 canvas, offset = prepare_canvas(montage)
-                viewer.add_image(canvas, name=f"{name} [montage]", colormap="gray")
-                offsets["Image 1"] = offset
+                layer = viewer.add_image(canvas, name=f"{name} [montage]", colormap="gray")
+                _set_canvas_offset(layer,offset)
                 if show_raw:
                     viewer.add_image(raw, name=f"{name} [raw stack]", colormap="gray")
             else:
@@ -1226,22 +1242,23 @@ def load_images_widget(viewer: "napari.viewer.Viewer") -> Container:
                 if raw.ndim == 3:
                     mid = raw.shape[0] // 2
                     canvas, offset = prepare_canvas(raw[mid])
-                    viewer.add_image(canvas, name=f"{name} [preview]", colormap="gray")
-                    offsets["Image 1"] = offset
+                    layer = viewer.add_image(canvas, name=f"{name} [preview]", colormap="gray")
+                    _set_canvas_offset(layer,offset)
                 elif raw.ndim == 2:
                     canvas, offset = prepare_canvas(raw)
-                    viewer.add_image(canvas, name=f"{name} [preview]", colormap="gray")
-                    offsets["Image 1"] = offset
+                    layer = viewer.add_image(canvas, name=f"{name} [preview]", colormap="gray")
+                    _set_canvas_offset(layer,offset)
+
 
         # --- Normal images ---
         else:
             img = io.imread(str(mrc_path))
             canvas, offset = prepare_canvas(img)
             if img.ndim == 2:
-                viewer.add_image(canvas, name=f"{name} [image]", colormap="gray")
+                layer = viewer.add_image(canvas, name=f"{name} [image]", colormap="gray")
             else:
-                viewer.add_image(canvas, name=f"{name} [image]")
-            offsets["Image 1"] = offset
+                layer = viewer.add_image(canvas, name=f"{name} [image]")
+            _set_canvas_offset(layer,offset)
 
     button.clicked.connect(_on_click)
     return Container(widgets=[mrc_edit, button])
@@ -1258,8 +1275,13 @@ def make_image_panel(viewer, name: str = "Image 1") -> Container:
     flipv_btn, fliph_btn, new_pts_btn = PushButton(text="Flip V"), PushButton(text="Flip H"), PushButton(text="New Points Layer")
 
     def on_select(event=None):
+        #print("combo", combo.value)
         if combo.value:
-            assigned_images[name] = viewer.layers[combo.value]
+            assigned_images[name] = viewer.layers[combo.value] # this returs actual napari layer for the combo.value image that was selected
+
+            #updates the gui text maybe label.value = Image 1: X7Y6_FLM_RGB_2 [image]
+            #original_images[name]  stores copy of image pixels  preserves the separate snapshot cause of the np.copy
+            # assigned_images[name] is a napari layer object and hass diffrent attributes .data stores actual pixel data
             label.value, original_images[name] = f"{name}: {combo.value}", np.copy(assigned_images[name].data)
 
     def on_clear(event=None):
@@ -1411,8 +1433,9 @@ def load_points_widget(viewer: "napari.viewer.Viewer") -> Container:
 
         try:
             pts_yx = _read_csv_points(Path(path))  # (N,2) as (y,x)
-            which = combo.value or "Image 1"
-            y0, x0 = offsets.get(which, (0, 0))
+            which = combo.value or "Image 1" # which is a role but now our offset belongs to actual layer assigned to that role
+            image_layer = assigned_images.get(which)
+            y0, x0 = _get_canvas_offset(image_layer)
             pts_yx = pts_yx.copy()
             pts_yx[:, 0] += float(y0)
             pts_yx[:, 1] += float(x0)
