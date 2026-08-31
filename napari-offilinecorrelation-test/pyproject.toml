@@ -7,7 +7,7 @@ name = "correlation-2d-3d"
 version = "0.1.0"
 description = "Napari plugin for Correlation 2D-3D: Offline Correlation and SerialEM Integration"
 authors = [
-  { name = "Your Name", email = "Your Email" },
+  { name = "Author Name", email = "author@example.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.11"
