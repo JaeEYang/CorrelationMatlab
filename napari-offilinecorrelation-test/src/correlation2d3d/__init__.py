@@ -1,1 +1,1 @@
-from ._widget import *
+"""Correlation 2D-3D package."""
