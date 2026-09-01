@@ -16,17 +16,17 @@ class Points2D:
         array = np.array(
         self.xy, 
         dtype= np.float64,
-        copy = True,
-        order = 'C'
+        copy = True, # create a copy to avoid modifying the original array
+        order = 'C' # xy order, contiguous in memory
     )
-
+        # make sure the dimension matches the expected shape (N, 2)
         if array.ndim != 2 or array.shape[1] != 2:
             raise ValueError(f"Points2D must be a 2D array with shape (N, 2), got shape {array.shape}")
-        if not np.isfinite(array).all():
+        if not np.isfinite(array).all(): # finite values no NaN or inf. Could mess up the tranformation calculations
             raise ValueError("Points2D array must contain only finite values.")
 
-        array.setflags(write=False)  # Make the array immutable
-        object.__setattr__(self, 'xy', array)
+        array.setflags(write=False)  # Make the Numpy buffer read only to prevent accidental mutation
+        object.__setattr__(self, 'xy', array) # bypass frozen dataclass restriction to set the attribute
         
     def __len__(self):
         return len(self.xy)
