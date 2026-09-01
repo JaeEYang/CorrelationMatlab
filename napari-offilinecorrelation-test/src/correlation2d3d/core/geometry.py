@@ -14,11 +14,11 @@ class Points2D:
 
     def __post_init__(self):
         array = np.array(
-            self.xy, 
-            dtype=np.float64
-            copy = True,
-            order = 'C'
-        )
+        self.xy, 
+        dtype= np.float64,
+        copy = True,
+        order = 'C'
+    )
 
         if array.ndim != 2 or array.shape[1] != 2:
             raise ValueError(f"Points2D must be a 2D array with shape (N, 2), got shape {array.shape}")
