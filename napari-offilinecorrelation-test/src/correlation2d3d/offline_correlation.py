@@ -2,7 +2,7 @@ from pathlib import Path
 
 import mrcfile
 import numpy as np
-from magicgui.widgets import ( Container, FileEdit, Label, PushButton,) # This is a magicgui container that will hold the widgets for the offline correlation tool. 
+from magicgui.widgets import Container, FileEdit, Label, PushButton, FloatSlider # This is a magicgui container that will hold the widgets for the offline correlation tool. 
 #It includes a label, file edit widgets for loading images and points, and push buttons for performing actions such as warping images and computing registrations.
 from skimage import io
 
@@ -11,6 +11,8 @@ from correlation2d3d.session import CorrelationSession
 from correlation2d3d.fileio.points_csv import read_points_csv
 
 from correlation2d3d.core.transform import fit_affine
+
+from correlation2d3d.core.warp import warp_image
 
 
 '''user clicks button
@@ -115,6 +117,35 @@ def make_offline_correlation_widget(viewer) -> Container:
     registration_status = Label(
         value="Registration: not calculated"
     )
+    
+    warp_button = PushButton(
+        text="Warp FLM to TEM"
+    )
+
+    warp_button.enabled = False
+
+    warp_status = Label(
+        value="Warp: not calculated"
+    )
+    
+    warped_opacity = FloatSlider(
+        label = "Warped FLM Opacity",
+        min = 0.0,
+        max = 1.0,
+        step = 0.05,
+        value = 0.5
+    )
+    warped_opacity.enabled = False
+    
+    
+    
+    # a small helper to decide if warping is possible, do we have the images and the registration matrix.
+    def _update_warp_button() -> None:
+        warp_button.enabled = (
+            session.flm_image is not None
+            and session.tem_image is not None
+            and session.registration is not None
+        )
     
     # enable the registration buttion is both flm and tem data exist in the session this gets populated in the _load_points
     def _update_registration_button() -> None:
@@ -257,6 +288,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         )
 
         _update_registration_button()
+        
     # connect the buttons load the points same as above
     def _on_load_flm_points(event=None):
         _load_points(
@@ -283,6 +315,10 @@ def make_offline_correlation_widget(viewer) -> Container:
     # the actual call back function when registration clicked on
     # this creates the tranformed layer basically.
     def _on_calculate_registration(event=None):
+        # invalidate an old warp when recalculating registration
+        session.warped_flm = None
+        warp_status.value = "Warp: not calculated"
+        
         if (
             session.flm_points is None
             or session.tem_points is None
@@ -304,6 +340,8 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         session.registration = registration
+        
+        _update_warp_button() # this is where we enable it because now the registration is done. 
 
         predicted = registration.apply(
             session.flm_points
@@ -339,6 +377,70 @@ def make_offline_correlation_widget(viewer) -> Container:
     calculate_registration_button.clicked.connect(
         _on_calculate_registration
     )
+    
+    def _on_warp(event=None):
+        if (
+            session.flm_image is None
+            or session.tem_image is None
+            or session.registration is None
+        ):
+            warp_status.value = (
+                "Warp: load images and calculate registration first"
+            )
+            return
+        #
+        #suppose FLM is (732,782,2) and TEM (2046, 2880) then output shape is (2046, 2880)
+        #Take the FLM image, transform it using the FLM -> TEM registration, and create the result on a 2046 × 2880 TEM-sized canvas.
+        # Because the FLM is RGB the result should be Warped FLM (2046, 2880, 3)
+        warped = warp_image(
+            session.flm_image,
+            session.registration,
+            output_shape=session.tem_image.shape[:2],
+        )
+
+        session.warped_flm = warped
+
+        layer_name = "Warped FLM"
+
+        try:
+            layer = viewer.layers[layer_name]
+        except KeyError:
+            viewer.add_image(
+                warped,
+                name=layer_name,
+                opacity=float(warped_opacity.value), # can change the opacity based on slider
+                blending="translucent",
+            )
+        else:
+            layer.data = warped
+            layer.opacity = float(
+            warped_opacity.value
+            )
+        
+        # The warp has now succeeded
+        warped_opacity.enabled = True
+        
+        warp_status.value = (
+            f"Warped FLM: {tuple(warped.shape)}"
+        )
+        
+    warp_button.clicked.connect(
+    _on_warp
+    )
+    
+    # callback for the Warped Opactiy
+    def _on_warped_opacity_change(event = None):
+        
+        try:
+            layer = viewer.layers["Warped FLM"]
+        except KeyError:
+            return
+        layer.opacity = float(
+            warped_opacity.value
+        )
+    warped_opacity.changed.connect(
+        _on_warped_opacity_change
+    )
 
     
         
@@ -366,6 +468,10 @@ def make_offline_correlation_widget(viewer) -> Container:
             
             calculate_registration_button,
             registration_status,
+            
+            warp_button,
+            warp_status,
+            warped_opacity,
         ]
     )
         

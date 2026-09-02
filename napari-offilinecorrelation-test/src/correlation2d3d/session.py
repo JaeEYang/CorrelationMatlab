@@ -28,3 +28,4 @@ class CorrelationSession:
     tem_points: Points2D | None = None
 
     registration: Registration2D | None = None
+    warped_flm: np.ndarray | None = None
