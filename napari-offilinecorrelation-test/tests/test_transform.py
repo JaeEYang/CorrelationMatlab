@@ -1,6 +1,9 @@
 import numpy as np
 import pytest
 
+from pathlib import Path
+
+from correlation2d3d.fileio.points_csv import read_points_csv
 from correlation2d3d.core.geometry import Points2D
 from correlation2d3d.core.transform import fit_affine
 from correlation2d3d.core.transform import Registration2D
@@ -135,3 +138,54 @@ def test_fit_affine_rejects_collinear_source_points():
 
     with pytest.raises(ValueError):
         fit_affine(source, destination)
+        
+        
+# this test makes sure that the fit_affine() function produces results that are consistent with a known reference implementation in MATLAB. 
+# It reads in two sets of points from CSV files, fits an affine transformation using the fit_affine() function, 
+# and then compares the resulting transformation matrix to the reference matrix computed using MATLAB's least-squares approach.
+# The test passes if the two matrices are sufficiently close within a specified tolerance.      
+def test_fit_affine_matches_matlab_reference():
+    repo_root = Path(__file__).resolve().parents[2]
+
+    flm_path = (
+        repo_root
+        / "data"
+        / "Item2_X7Y6_FLM_RegSpread9.csv"
+    )
+
+    tem_path = (
+        repo_root
+        / "data"
+        / "Item1_ER80_G3_470x_Pt6_TEM_RegSpread9.csv"
+    )
+
+    flm = read_points_csv(flm_path)
+    tem = read_points_csv(tem_path)
+
+    registration = fit_affine(
+        flm,
+        tem,
+    )
+
+    P = np.vstack([
+        flm.xy.T,
+        np.ones(len(flm)),
+    ])
+
+    Q = np.vstack([
+        tem.xy.T,
+        np.ones(len(tem)),
+    ])
+    
+    # compute the reference matrix using the same approach as MATLAB
+    matlab_reference = (
+        Q
+        @ P.T
+        @ np.linalg.inv(P @ P.T)
+    )
+
+    np.testing.assert_allclose(
+        registration.matrix,
+        matlab_reference,
+        atol=1e-10,
+    )

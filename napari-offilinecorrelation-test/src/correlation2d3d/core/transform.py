@@ -9,7 +9,7 @@ from correlation2d3d.core.geometry import Points2D
 class Registration2D:
     matrix: np.ndarray
     forward_residuals: np.ndarray | None = None
-
+    
     def __post_init__(self):
         matrix = np.array(
             self.matrix,
