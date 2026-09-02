@@ -27,7 +27,11 @@ _load_image()
       ↓
 _read_image()
       ↓
-session + napari updated'''
+session + napari updated
+
+similar execution for other things aswell.
+
+'''
 
 # This function creates a magicgui container widget for the offline correlation tool.
 def _read_image(path: Path) -> np.ndarray:
@@ -45,11 +49,17 @@ def _read_image(path: Path) -> np.ndarray:
         io.imread(str(path))
     )
     
+    # This function is basically our widget factory, call this function and it constructs an object for you! that is awesome
+    # gui construction worker 
+    # it It eventually returns a Container which is the actual gui panel containing all the controls
 def make_offline_correlation_widget(viewer) -> Container:
     '''Creates a magicgui container widget for the offline correlation tool.
     The widget includes file edit widgets for loading FLM and TEM images, push buttons for loading the images, and labels to display the status of the loaded images ...
     The function initializes a CorrelationSession object to store the state of the correlation session, including the loaded images, points, and registration information.'''
     
+    
+    # Every offline-correlation widget has a particular CorrelationSession associated with it.
+    # he session is the memory of the current correlation job.
     session = CorrelationSession()
 
     flm_file = FileEdit(
@@ -501,4 +511,61 @@ callbacks
                  │
                  └── remember session
 
-The callbacks remain connected to the buttons, so Python keeps the objects they reference alive. '''
+The callbacks remain connected to the buttons, so Python keeps the objects they reference alive. 
+
+
+There are three representations of data in here 
+
+If we load an FLM image.
+
+That image exists in three conceptually different places.
+
+Place 1: disk
+
+For example:
+
+C:\data\FLM_image.tif
+
+Just bytes in a file.
+
+Place 2: Python/session
+
+After reading:
+
+session.flm_image
+
+might contain:
+
+np.ndarray
+
+Now Python can calculate with it.
+
+Place 3: napari
+
+Napari has:
+
+FLM layer
+
+This is the visualization of the image.
+
+So:
+
+FILE ON DISK
+     │
+     │ _read_image()
+     ▼
+NUMPY ARRAY
+     │
+     ├──────────────► session.flm_image
+     │
+     └──────────────► napari "FLM" layer
+
+That distinction is fundamental.
+
+The session does not exist primarily to display the image.
+
+Napari does not exist primarily to hold the computational state.
+
+They have different jobs.
+
+'''
