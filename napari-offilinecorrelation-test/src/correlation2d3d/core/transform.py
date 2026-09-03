@@ -68,7 +68,7 @@ def _apply_matrix(matrix: np.ndarray, points: Points2D) -> Points2D:
     ]) 
     
     
-    '''
+    """ 
     create homogeneous coordinates by appending a column of ones to the points 
     N × 3
     our points are in the form of 
@@ -121,9 +121,8 @@ def _apply_matrix(matrix: np.ndarray, points: Points2D) -> Points2D:
 
     [x', y']
 
-    and we construct a new Points2D.
-    
-    '''
+    and we construct a new Points2D.    
+    """
     
     transformed = (
         matrix @ homogeneous.T

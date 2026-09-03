@@ -14,6 +14,8 @@ from correlation2d3d.core.transform import fit_affine
 
 from correlation2d3d.core.warp import warp_image
 
+from correlation2d3d.core.orientation import flip_horizontal
+
 
 '''user clicks button
       ↓
@@ -146,6 +148,10 @@ def make_offline_correlation_widget(viewer) -> Container:
         value = 0.5
     )
     warped_opacity.enabled = False
+    
+    flip_horizontal_button = PushButton(
+    text="↔ Flip H"
+    )
     
     
     
@@ -458,6 +464,52 @@ def make_offline_correlation_widget(viewer) -> Container:
     warped_opacity.changed.connect(
         _on_warped_opacity_change
     )
+    
+    def _on_flip_horizontal(event=None):
+        # if no image just return
+        if (
+            session.flm_image is None
+            or session.flm_points is None
+        ):
+            return
+
+        # get the flipped image and the corrsponding flipped landmarks#
+        flipped_image, flipped_points = flip_horizontal(
+            session.flm_image,
+            session.flm_points,
+        )
+
+        # save them in the CorrelationSession to update the session state
+        session.flm_image = flipped_image
+        session.flm_points = flipped_points
+
+        # for each layer update the correspoint image data and landmarks data
+        viewer.layers["FLM"].data = flipped_image
+        viewer.layers["FLM Landmarks"].data = (
+            flipped_points.to_rc()
+        )
+
+        # now we gotta reset the registration and warped  cause it would "change" 
+        session.registration = None
+        session.warped_flm = None
+
+        #update the status message for the registration
+        registration_status.value = (
+            "Registration: not calculated"
+        )
+
+        warp_status.value = (
+            "Warp: not calculated"
+        )
+
+        # change the warp button back to false cause we need to redo the registration and then turn it back on same goes with opacity.
+        warp_button.enabled = False
+        warped_opacity.enabled = False
+        
+     # connect the button to the callback.   
+    flip_horizontal_button.clicked.connect(
+        _on_flip_horizontal
+    )
 
     
         
@@ -489,12 +541,14 @@ def make_offline_correlation_widget(viewer) -> Container:
             warp_button,
             warp_status,
             warped_opacity,
+            
+            flip_horizontal_button,
         ]
     )
         
 
     
-    '''_read_image()
+"""_read_image()
     disk → NumPy
 
 
@@ -575,4 +629,4 @@ Napari does not exist primarily to hold the computational state.
 
 They have different jobs.
 
-'''
+"""
