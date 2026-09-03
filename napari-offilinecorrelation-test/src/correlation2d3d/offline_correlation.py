@@ -165,26 +165,33 @@ def make_offline_correlation_widget(viewer) -> Container:
         )
     
     
-    
+    # 
     def _load_image( file_widget: FileEdit, role: str, status: Label) -> None:
         
         '''Loads an image from a file path specified in the file_widget and updates the corresponding status label.
         The function checks if the file path is valid and reads the image using the _read_image function. 
         It then updates the CorrelationSession object with the loaded image and adds it to the napari viewer. 
-        If the file path is invalid or the file does not exist, it updates the status label accordingly.  '''
+        If the file path is invalid or the file does not exist, it updates the status label accordingly. 
         
-        if not file_widget.value: # did the user actually choose anything?
-            status.value = (
-                f"{role}: choose an image first"
-            )
+        Input: file_widget : FileEdit -> could be either " flm_file" or "tem_file" they both have .value attribute which is basically the path user selected.
+                
+                role: str -> FLM or TEM image helps to modify the CorrelationSession
+                status: Label -> it has a .value changes based different conditions.
+                
+        
+        '''
+        value = file_widget.value # get the location of the image
+        # did the user actually choose anything? is no path return
+        if value is None or str(value) in {"", "."}: # reason for this is that empty path is not really empty it had ".", ""
+            status.value = f"{role}: choose an image first"
             return
 
-        path = Path(file_widget.value) # get the path and make it Path object
 
-        if not path.is_file(): # what if file at that location does not exist ?
-            status.value = (
-                f"{role}: file does not exist"
-            )
+        path = Path(value) # convert the GUI value into path and make it Path object
+
+        # what if file at that location does not exist ?
+        if not path.is_file():
+            status.value = f"{role}: file does not exist"
             return
 
         image = _read_image(path) # read the image.
@@ -205,7 +212,7 @@ def make_offline_correlation_widget(viewer) -> Container:
                 name=role,
             )
         else:
-            layer.data = image
+            layer.data = image # If an FLM layer already exists Maybe you loaded another FLM previously. Instead of creating: FLM, FLM [1]. FLM[2] ...just use the existing layer and update with new image
 
         status.value = (
             f"{role}: {path.name} "
