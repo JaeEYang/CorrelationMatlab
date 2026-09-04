@@ -188,3 +188,36 @@ def fit_affine(
         matrix=matrix,
         forward_residuals=forward_residuals,
     )
+def affine_xy_to_rc( matrix: np.ndarray) -> np.ndarray:
+    """
+    Convert a homogeneous 2D affine matrix from
+    (x, y) coordinate order to (row, column) order.
+
+    Our core uses:
+        [x, y, 1]
+
+    napari uses:
+        [row, column, 1] = [y, x, 1]
+    """
+    matrix = np.asarray(
+        matrix,
+        dtype=np.float64,
+    )
+
+    if matrix.shape != (3, 3):
+        raise ValueError(
+            "affine matrix must have shape (3, 3)"
+        )
+
+    # change of basis matrix. permutation matrix swaps xy->yx and it is its own inverse
+    swap_xy_rc = np.array([
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+
+    return (
+        swap_xy_rc
+        @ matrix
+        @ swap_xy_rc
+    )

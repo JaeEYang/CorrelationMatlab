@@ -5,8 +5,8 @@ from pathlib import Path
 
 from correlation2d3d.fileio.points_csv import read_points_csv
 from correlation2d3d.core.geometry import Points2D
-from correlation2d3d.core.transform import fit_affine
-from correlation2d3d.core.transform import Registration2D
+from correlation2d3d.core.transform import fit_affine, Registration2D, affine_xy_to_rc
+
 
 def test_fit_affine_recovers_exact_transform():
     source = Points2D([
@@ -188,4 +188,45 @@ def test_fit_affine_matches_matlab_reference():
         registration.matrix,
         matlab_reference,
         atol=1e-10,
+    )
+    
+def test_affine_xy_to_rc_preserves_geometry():
+    matrix_xy = np.array([
+        [2.0, 0.5, 5.0],
+        [-0.25, 3.0, 10.0],
+        [0.0, 0.0, 1.0],
+    ])
+
+    matrix_rc = affine_xy_to_rc(
+        matrix_xy
+    )
+
+    point_xy = np.array([
+        2.0,
+        4.0,
+        1.0,
+    ])
+
+    point_rc = np.array([
+        4.0,  # row = y
+        2.0,  # column = x
+        1.0,
+    ])
+
+    transformed_xy = (
+        matrix_xy @ point_xy
+    )
+
+    transformed_rc = (
+        matrix_rc @ point_rc
+    )
+
+    np.testing.assert_allclose(
+        transformed_rc,
+        np.array([
+            transformed_xy[1],
+            transformed_xy[0],
+            1.0,
+        ]),
+        atol=1e-12,
     )

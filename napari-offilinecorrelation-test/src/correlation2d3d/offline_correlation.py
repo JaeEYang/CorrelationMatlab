@@ -14,7 +14,7 @@ from correlation2d3d.core.warp import warp_image
 
 from correlation2d3d.core.orientation import flip_horizontal, horizontal_flip_matrix
 
-from correlation2d3d.core.transform import apply_affine_matrix, fit_affine
+from correlation2d3d.core.transform import apply_affine_matrix, fit_affine, affine_xy_to_rc
 
 
 
@@ -229,6 +229,9 @@ def make_offline_correlation_widget(viewer) -> Container:
         _remove_layer_if_present(
             "Warped FLM"
         )
+        _remove_layer_if_present(
+            "Registered FLM"
+        )
     
     
     # 
@@ -298,15 +301,13 @@ def make_offline_correlation_widget(viewer) -> Container:
         _update_registration_button()
 
         # Create or update the napari image layer.
-        try:
-            layer = viewer.layers[role]
-        except KeyError:
-            viewer.add_image(
-                modality.image,
-                name=role,
-            )
-        else:
-            layer.data = modality.image
+                # Recreate the layer so napari detects grayscale/RGB correctly.
+        _remove_layer_if_present(role)
+
+        viewer.add_image(
+            modality.image,
+            name=role,
+        )
 
         status.value = (
             f"{role}: {path.name} "
@@ -485,17 +486,38 @@ def make_offline_correlation_widget(viewer) -> Container:
             transformed_rc,
             name=transformed_layer_name,
             size=32,
-            face_color="red",
+            face_color="#00007f",
         )
         else:
             layer.data = transformed_rc
             layer.size = 32
-            layer.face_color = "red"
+            layer.face_color = "#00007f"
 
         registration_status.value = (
             f"Registration RMSE: "
             f"{registration.rmse:.3f} TEM pixels"
         )
+        
+        
+        if (
+            session.flm.image is not None
+            and session.tem.image is not None
+        ):
+            registered_affine_rc = affine_xy_to_rc(
+                registration.matrix
+            )
+
+            _remove_layer_if_present(
+                "Registered FLM"
+            )
+
+            viewer.add_image(
+                session.flm.image,
+                name="Registered FLM",
+                affine=registered_affine_rc,
+                opacity=0.5,
+                blending="translucent",
+            )
         
     calculate_registration_button.clicked.connect(
         _on_calculate_registration
