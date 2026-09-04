@@ -49,6 +49,42 @@ def flip_horizontal(image:np.ndarray, points:Points2D|None = None) -> tuple[np.n
         flipped_points,
     )
     
+    
+# Vertical flip siimlary  as horizontal 
+def vertical_flip_matrix(height: int) -> np.ndarray:
+    return np.array([
+        [1.0,  0.0, 0.0],
+        [0.0, -1.0, height - 1.0],  # basic math y' = -y + (H-1)
+        [0.0,  0.0, 1.0],
+    ], dtype=np.float64)
+    
+def flip_vertical(image: np.ndarray, points: Points2D | None = None) -> tuple[np.ndarray, Points2D | None]:
+
+        if image.ndim < 2:
+            raise ValueError(
+                "image must have at least two dimensions"
+            )
+
+        height = image.shape[0]
+
+        flipped_image = np.flip(
+            image,
+            axis=0,
+        ).copy()
+
+        flipped_points = None
+        # if points are loaded aswell at that point apply the same tranformation to them aswell.
+        if points is not None: 
+            flipped_points = apply_affine_matrix(
+                vertical_flip_matrix(height),
+                points,
+            )
+
+        return (
+            flipped_image,
+            flipped_points,
+        )
+    
 def apply_orientation_to_points( points: Points2D, matrix: np.ndarray) -> Points2D:
     matrix = np.asarray(
         matrix,

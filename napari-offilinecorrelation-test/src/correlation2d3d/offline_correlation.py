@@ -12,7 +12,12 @@ from correlation2d3d.fileio.points_csv import read_points_csv
 
 from correlation2d3d.core.warp import warp_image
 
-from correlation2d3d.core.orientation import flip_horizontal, horizontal_flip_matrix
+from correlation2d3d.core.orientation import (
+    flip_horizontal,
+    flip_vertical,
+    horizontal_flip_matrix,
+    vertical_flip_matrix,
+)
 
 from correlation2d3d.core.transform import apply_affine_matrix, fit_affine, affine_xy_to_rc
 
@@ -164,12 +169,47 @@ def make_offline_correlation_widget(viewer) -> Container:
     
     # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
     flip_flm_horizontal_button = PushButton(
-        text="↔ Flip H"
+        text="↔ H"
     )
 
-    # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
+    flip_flm_vertical_button = PushButton(
+        text="↕ V"
+    )
+
     flip_tem_horizontal_button = PushButton(
-        text="↔ Flip H"
+        text="↔ H"
+    )
+
+    flip_tem_vertical_button = PushButton(
+        text="↕ V"
+    )
+
+    flip_flm_horizontal_button.max_width = 70
+    flip_flm_vertical_button.max_width = 70
+
+    flip_tem_horizontal_button.max_width = 70
+    flip_tem_vertical_button.max_width = 70
+
+    flip_flm_horizontal_button.enabled = False
+    flip_flm_vertical_button.enabled = False
+
+    flip_tem_horizontal_button.enabled = False
+    flip_tem_vertical_button.enabled = False
+    
+    flm_flip_row = Container(
+        widgets=[
+            flip_flm_horizontal_button,
+            flip_flm_vertical_button,
+        ],
+        layout="horizontal",
+    )
+
+    tem_flip_row = Container(
+        widgets=[
+            flip_tem_horizontal_button,
+            flip_tem_vertical_button,
+        ],
+        layout="horizontal",
     )
 
     flip_flm_horizontal_button.enabled = False
@@ -318,11 +358,15 @@ def make_offline_correlation_widget(viewer) -> Container:
         # an image has successfully loaded.
         if role == "FLM":
             flip_flm_horizontal_button.enabled = True
+            flip_flm_vertical_button.enabled = True
+
             flm_points_status.value = (
                 "FLM landmarks: not loaded"
             )
         else:
             flip_tem_horizontal_button.enabled = True
+            flip_tem_vertical_button.enabled = True
+
             tem_points_status.value = (
                 "TEM landmarks: not loaded"
             )
@@ -377,15 +421,17 @@ def make_offline_correlation_widget(viewer) -> Container:
         modality = _get_modality(role)
 
         modality.original_points = points
+        # this is cool now if we upload the points after we have already flipped or rotated the image. 
+        # this will apply the correct tranformation to them aswell.
         modality.points = apply_affine_matrix(
         modality.orientation_matrix,
         modality.original_points,
         )
 
         layer_name = f"{role} Landmarks"
-
-        napari_points = modality.points.to_rc() # convert to napari points convention y,x/ rc these will be recieved by napari frontend
-       
+        
+        # convert to napari points convention y,x/ rc these will be recieved by napari frontend
+        napari_points = modality.points.to_rc() 
         try:
             layer = viewer.layers[layer_name]
         except KeyError:
@@ -586,34 +632,24 @@ def make_offline_correlation_widget(viewer) -> Container:
     warped_opacity.changed.connect(
         _on_warped_opacity_change
     )
-    
-    def _flip_modality_horizontal(role:str)->None:
+
+    # Geniric helper function to apply the orientation to given modality 
+    # we also keep track of what orientation  was applied before to particualy image which is just multiplying the orientation matrix with withe curent operation matrix
+    def _apply_modality_orientation( role: str, oriented_image: np.ndarray, operation_matrix: np.ndarray) -> None:
+
         modality = _get_modality(role)
-        
-        # oreientation should work even if landmarks have not been loaded yet.
-        if modality.image is None:
-            return
 
-        width = modality.image.shape[1]
-        # get the flipped image and the corrsponding flipped landmarks#
-        flip_matrix = horizontal_flip_matrix(width)
-        
-         # Transform the current image.
-        flipped_image, _ = flip_horizontal(
-            modality.image
-        )
+        modality.image = oriented_image
 
-        modality.image = flipped_image
-
-        # Record how original coordinates map
-        # into the new current coordinates.
+        # New operation happens AFTER all previous
+        # orientation operations.
         modality.orientation_matrix = (
-            flip_matrix
+            operation_matrix
             @ modality.orientation_matrix
         )
 
-        #rebuild current points from the ORIGINAL points.
-        #never progressively modify current points.
+        #always rebuild current points from the
+        #orriginal landmarks.
         if modality.original_points is not None:
             modality.points = apply_affine_matrix(
                 modality.orientation_matrix,
@@ -622,10 +658,10 @@ def make_offline_correlation_widget(viewer) -> Container:
         else:
             modality.points = None
 
-        # Update image shown in napari.
+        # Update the image displayed by napari.
         viewer.layers[role].data = modality.image
 
-        # Update landmarks only if they currently exist.
+        # Update landmark display if landmarks exist.
         if modality.points is not None:
             layer_name = f"{role} Landmarks"
 
@@ -636,8 +672,55 @@ def make_offline_correlation_widget(viewer) -> Container:
             else:
                 layer.data = modality.points.to_rc()
 
+        # Registration referred to the previous
+        # orientation, so it is no longer valid.
         _invalidate_registration()
-            
+        
+    #Figure out how to perform a horizontal flip.
+    def _flip_modality_horizontal(role: str) -> None:
+        modality = _get_modality(role)
+
+        if modality.image is None:
+            return
+
+        width = modality.image.shape[1]
+
+        operation_matrix = horizontal_flip_matrix(
+            width
+        )
+
+        flipped_image, _ = flip_horizontal(
+            modality.image
+        )
+
+        _apply_modality_orientation(
+            role,
+            flipped_image,
+            operation_matrix,
+        )
+        
+    def _flip_modality_vertical(role: str) -> None:
+        modality = _get_modality(role)
+
+        if modality.image is None:
+            return
+
+        height = modality.image.shape[0]
+
+        operation_matrix = vertical_flip_matrix(
+            height
+        )
+
+        flipped_image, _ = flip_vertical(
+            modality.image
+        )
+
+        _apply_modality_orientation(
+            role,
+            flipped_image,
+            operation_matrix,
+        )
+                    
      # connect the button to the callback.   
     def _on_flip_flm_horizontal(event=None):
         _flip_modality_horizontal("FLM")
@@ -646,15 +729,28 @@ def make_offline_correlation_widget(viewer) -> Container:
     def _on_flip_tem_horizontal(event=None):
         _flip_modality_horizontal("TEM")
 
+    def _on_flip_flm_vertical(event=None):
+        _flip_modality_vertical("FLM")
+
+
+    def _on_flip_tem_vertical(event=None):
+        _flip_modality_vertical("TEM")
 
     flip_flm_horizontal_button.clicked.connect(
         _on_flip_flm_horizontal
     )
 
+    flip_flm_vertical_button.clicked.connect(
+        _on_flip_flm_vertical
+    )
+
     flip_tem_horizontal_button.clicked.connect(
         _on_flip_tem_horizontal
     )
-    
+
+    flip_tem_vertical_button.clicked.connect(
+        _on_flip_tem_vertical
+    )
         
     return Container(
         widgets=[
@@ -665,7 +761,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             flm_file,
             load_flm_button,
             flm_status,
-            flip_flm_horizontal_button,
+            flm_flip_row,
 
             flm_points_file,
             load_flm_points_button,
@@ -675,7 +771,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             tem_file,
             load_tem_button,
             tem_status,
-            flip_tem_horizontal_button,
+            tem_flip_row,
 
             tem_points_file,
             load_tem_points_button,
