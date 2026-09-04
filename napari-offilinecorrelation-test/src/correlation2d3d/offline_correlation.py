@@ -10,11 +10,12 @@ from correlation2d3d.session import CorrelationSession
 
 from correlation2d3d.fileio.points_csv import read_points_csv
 
-from correlation2d3d.core.transform import fit_affine
-
 from correlation2d3d.core.warp import warp_image
 
-from correlation2d3d.core.orientation import flip_horizontal
+from correlation2d3d.core.orientation import flip_horizontal, horizontal_flip_matrix
+
+from correlation2d3d.core.transform import apply_affine_matrix, fit_affine
+
 
 
 '''user clicks button
@@ -35,7 +36,7 @@ similar execution for other things aswell.
 
 '''
 
-# This function creates a magicgui container widget for the offline correlation tool.
+
 def _read_image(path: Path) -> np.ndarray:
     '''Reads an image from a file path and returns it as a numpy array.
     The function supports MRC, MRCS, and ST file formats using the mrcfile library, as well as other image formats supported by skimage.io.imread.
@@ -51,6 +52,7 @@ def _read_image(path: Path) -> np.ndarray:
         io.imread(str(path))
     )
     
+    # This function creates a magicgui container widget for the offline correlation tool.
     # This function is basically our widget factory, call this function and it constructs an object for you! that is awesome
     # gui construction worker 
     # it It eventually returns a Container which is the actual gui panel containing all the controls
@@ -63,6 +65,17 @@ def make_offline_correlation_widget(viewer) -> Container:
     # Every offline-correlation widget has a particular CorrelationSession associated with it.
     # he session is the memory of the current correlation job.
     session = CorrelationSession()
+    # this becomes out generic loader for modalities make it bit tidy to keep track of session state.
+    def _get_modality(role: str):
+        if role == "FLM":
+            return session.flm
+
+        if role == "TEM":
+            return session.tem
+
+        raise ValueError(
+            f"unknown modality role: {role}"
+        )
 
     flm_file = FileEdit(
         label="FLM Image",
@@ -149,32 +162,79 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     warped_opacity.enabled = False
     
-    flip_horizontal_button = PushButton(
-    text="↔ Flip H"
+    # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
+    flip_flm_horizontal_button = PushButton(
+        text="↔ Flip H"
     )
+
+    # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
+    flip_tem_horizontal_button = PushButton(
+        text="↔ Flip H"
+    )
+
+    flip_flm_horizontal_button.enabled = False
+    flip_tem_horizontal_button.enabled = False
+    
+    # helper if layer exists we can remove it if not do nothing.
+    def _remove_layer_if_present(
+        layer_name: str,
+    ) -> None:
+        try:
+            layer = viewer.layers[layer_name]
+        except KeyError:
+            return
+
+        viewer.layers.remove(layer)
+        
     
     
     
     # a small helper to decide if warping is possible, do we have the images and the registration matrix.
     def _update_warp_button() -> None:
         warp_button.enabled = (
-            session.flm_image is not None
-            and session.tem_image is not None
+            session.flm.image is not None
+            and session.tem.image is not None
             and session.registration is not None
         )
     
     # enable the registration buttion is both flm and tem data exist in the session this gets populated in the _load_points
     def _update_registration_button() -> None:
             calculate_registration_button.enabled = (
-            session.flm_points is not None
-            and session.tem_points is not None
+            session.flm.points is not None
+            and session.tem.points is not None
+        )
+    
+    # lets say we did the registration and then changed the image orientation we should able to invalidate the old registraion matrix
+    # and also the warping becomes invalidated need to recalulate both 
+    def _invalidate_registration() -> None:
+        session.registration = None
+        session.warped_flm = None
+
+        registration_status.value = (
+            "Registration: not calculated"
+        )
+
+        warp_status.value = (
+            "Warp: not calculated"
+        )
+
+        warp_button.enabled = False
+        warped_opacity.enabled = False
+
+        # this removed those two layers aswell
+        _remove_layer_if_present(
+            "FLM Landmarks Registered to TEM"
+        )
+
+        _remove_layer_if_present(
+            "Warped FLM"
         )
     
     
     # 
     def _load_image( file_widget: FileEdit, role: str, status: Label) -> None:
         
-        '''Loads an image from a file path specified in the file_widget and updates the corresponding status label.
+        """Loads an image from a file path specified in the file_widget and updates the corresponding status label.
         The function checks if the file path is valid and reads the image using the _read_image function. 
         It then updates the CorrelationSession object with the loaded image and adds it to the napari viewer. 
         If the file path is invalid or the file does not exist, it updates the status label accordingly. 
@@ -185,7 +245,7 @@ def make_offline_correlation_widget(viewer) -> Container:
                 status: Label -> it has a .value changes based different conditions.
                 
         
-        '''
+        """
         value = file_widget.value # get the location of the image
         # did the user actually choose anything? is no path return
         if value is None or str(value) in {"", "."}: # reason for this is that empty path is not really empty it had ".", ""
@@ -201,29 +261,70 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         image = _read_image(path) # read the image.
+        
+        
 
         #update the session object with the loaded image based on the role (FLM or TEM)
         # Our session says: this exact NumPy array is the FLM image for this correlation job
-        if role == "FLM":
-            session.flm_image = image
-        else:
-            session.tem_image = image
+        modality = _get_modality(role)
         
-        # use napari's ability to access by its name
+        # both og and image will be same initially
+        modality.original_image = np.array(
+            image,
+            copy=True,
+        )
+        modality.image = np.array(
+            image,
+            copy=True,
+        )
+        # this resets the orintation back to identity incase user load the flm again after flip (reset-on-reload).
+        modality.orientation_matrix = np.eye(
+            3,
+            dtype=np.float64,
+        )
+        
+        #landmarks belonged to the previous image.
+        #the user must load/confirm landmarks for this image.
+        modality.original_points = None
+        modality.points = None
+        
+        _remove_layer_if_present(
+            f"{role} Landmarks"
+        )
+
+        #previous registration/warp can no longer
+        # be trusted after replacing an image.
+        _invalidate_registration()
+        _update_registration_button()
+
+        # Create or update the napari image layer.
         try:
             layer = viewer.layers[role]
         except KeyError:
             viewer.add_image(
-                image,
+                modality.image,
                 name=role,
             )
         else:
-            layer.data = image # If an FLM layer already exists Maybe you loaded another FLM previously. Instead of creating: FLM, FLM [1]. FLM[2] ...just use the existing layer and update with new image
+            layer.data = modality.image
 
         status.value = (
             f"{role}: {path.name} "
             f"{tuple(image.shape)}"
         )
+
+        # Orientation becomes available only after
+        # an image has successfully loaded.
+        if role == "FLM":
+            flip_flm_horizontal_button.enabled = True
+            flm_points_status.value = (
+                "FLM landmarks: not loaded"
+            )
+        else:
+            flip_tem_horizontal_button.enabled = True
+            tem_points_status.value = (
+                "TEM landmarks: not loaded"
+            )
         
     # connect the buttons to the _load_image function with the appropriate parameters
     def _on_load_flm(event=None):
@@ -272,14 +373,17 @@ def make_offline_correlation_widget(viewer) -> Container:
         points = read_points_csv(path)
         
         # same as above udpdate the session object
-        if role == "FLM":
-            session.flm_points = points
-        else:
-            session.tem_points = points
+        modality = _get_modality(role)
+
+        modality.original_points = points
+        modality.points = apply_affine_matrix(
+        modality.orientation_matrix,
+        modality.original_points,
+        )
 
         layer_name = f"{role} Landmarks"
 
-        napari_points = points.to_rc() # convert to napari points convention y,x/ rc these will be recieved by napari frontend
+        napari_points = modality.points.to_rc() # convert to napari points convention y,x/ rc these will be recieved by napari frontend
        
         try:
             layer = viewer.layers[layer_name]
@@ -305,11 +409,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         the previous registration is no longer trustworthy.
         '''
         
-        session.registration = None
-        registration_status.value = (
-            "Registration: not calculated"
-        )
-
+        _invalidate_registration()
         _update_registration_button()
         
     # connect the buttons load the points same as above
@@ -343,8 +443,8 @@ def make_offline_correlation_widget(viewer) -> Container:
         warp_status.value = "Warp: not calculated"
         
         if (
-            session.flm_points is None
-            or session.tem_points is None
+            session.flm.points is None
+            or session.tem.points is None
         ):
             registration_status.value = (
                 "Registration: load both landmark sets first"
@@ -353,8 +453,8 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         try:
             registration = fit_affine(
-                session.flm_points,
-                session.tem_points,
+                session.flm.points,
+                session.tem.points,
             )
         except ValueError as error:
             registration_status.value = (
@@ -367,7 +467,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         _update_warp_button() # this is where we enable it because now the registration is done. 
 
         predicted = registration.apply(
-            session.flm_points
+            session.flm.points
         )
 
         transformed_layer_name = (
@@ -403,8 +503,8 @@ def make_offline_correlation_widget(viewer) -> Container:
     
     def _on_warp(event=None):
         if (
-            session.flm_image is None
-            or session.tem_image is None
+            session.flm.image is None
+            or session.tem.image is None
             or session.registration is None
         ):
             warp_status.value = (
@@ -416,9 +516,9 @@ def make_offline_correlation_widget(viewer) -> Container:
         #Take the FLM image, transform it using the FLM -> TEM registration, and create the result on a 2046 × 2880 TEM-sized canvas.
         # Because the FLM is RGB the result should be Warped FLM (2046, 2880, 3)
         warped = warp_image(
-            session.flm_image,
+            session.flm.image,
             session.registration,
-            output_shape=session.tem_image.shape[:2],
+            output_shape=session.tem.image.shape[:2],
         )
 
         session.warped_flm = warped
@@ -465,52 +565,73 @@ def make_offline_correlation_widget(viewer) -> Container:
         _on_warped_opacity_change
     )
     
-    def _on_flip_horizontal(event=None):
-        # if no image just return
-        if (
-            session.flm_image is None
-            or session.flm_points is None
-        ):
+    def _flip_modality_horizontal(role:str)->None:
+        modality = _get_modality(role)
+        
+        # oreientation should work even if landmarks have not been loaded yet.
+        if modality.image is None:
             return
 
+        width = modality.image.shape[1]
         # get the flipped image and the corrsponding flipped landmarks#
-        flipped_image, flipped_points = flip_horizontal(
-            session.flm_image,
-            session.flm_points,
-        )
-
-        # save them in the CorrelationSession to update the session state
-        session.flm_image = flipped_image
-        session.flm_points = flipped_points
-
-        # for each layer update the correspoint image data and landmarks data
-        viewer.layers["FLM"].data = flipped_image
-        viewer.layers["FLM Landmarks"].data = (
-            flipped_points.to_rc()
-        )
-
-        # now we gotta reset the registration and warped  cause it would "change" 
-        session.registration = None
-        session.warped_flm = None
-
-        #update the status message for the registration
-        registration_status.value = (
-            "Registration: not calculated"
-        )
-
-        warp_status.value = (
-            "Warp: not calculated"
-        )
-
-        # change the warp button back to false cause we need to redo the registration and then turn it back on same goes with opacity.
-        warp_button.enabled = False
-        warped_opacity.enabled = False
+        flip_matrix = horizontal_flip_matrix(width)
         
+         # Transform the current image.
+        flipped_image, _ = flip_horizontal(
+            modality.image
+        )
+
+        modality.image = flipped_image
+
+        # Record how original coordinates map
+        # into the new current coordinates.
+        modality.orientation_matrix = (
+            flip_matrix
+            @ modality.orientation_matrix
+        )
+
+        #rebuild current points from the ORIGINAL points.
+        #never progressively modify current points.
+        if modality.original_points is not None:
+            modality.points = apply_affine_matrix(
+                modality.orientation_matrix,
+                modality.original_points,
+            )
+        else:
+            modality.points = None
+
+        # Update image shown in napari.
+        viewer.layers[role].data = modality.image
+
+        # Update landmarks only if they currently exist.
+        if modality.points is not None:
+            layer_name = f"{role} Landmarks"
+
+            try:
+                layer = viewer.layers[layer_name]
+            except KeyError:
+                pass
+            else:
+                layer.data = modality.points.to_rc()
+
+        _invalidate_registration()
+            
      # connect the button to the callback.   
-    flip_horizontal_button.clicked.connect(
-        _on_flip_horizontal
+    def _on_flip_flm_horizontal(event=None):
+        _flip_modality_horizontal("FLM")
+
+
+    def _on_flip_tem_horizontal(event=None):
+        _flip_modality_horizontal("TEM")
+
+
+    flip_flm_horizontal_button.clicked.connect(
+        _on_flip_flm_horizontal
     )
 
+    flip_tem_horizontal_button.clicked.connect(
+        _on_flip_tem_horizontal
+    )
     
         
     return Container(
@@ -518,31 +639,34 @@ def make_offline_correlation_widget(viewer) -> Container:
             Label(
                 value="Offline Correlation"
             ),
-
+            # FLM
             flm_file,
             load_flm_button,
             flm_status,
-
-            tem_file,
-            load_tem_button,
-            tem_status,
+            flip_flm_horizontal_button,
 
             flm_points_file,
             load_flm_points_button,
             flm_points_status,
 
+            # TEM
+            tem_file,
+            load_tem_button,
+            tem_status,
+            flip_tem_horizontal_button,
+
             tem_points_file,
             load_tem_points_button,
             tem_points_status,
-            
+
+            # Registration / warp
             calculate_registration_button,
             registration_status,
-            
+
             warp_button,
             warp_status,
             warped_opacity,
             
-            flip_horizontal_button,
         ]
     )
         

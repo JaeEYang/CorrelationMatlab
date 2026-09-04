@@ -44,7 +44,7 @@ class Registration2D:
 
         
     def apply(self, points: Points2D) -> Points2D:
-        return _apply_matrix( 
+        return apply_affine_matrix( 
             self.matrix,
             points,
         )
@@ -60,8 +60,9 @@ class Registration2D:
         )
         
         
-# Helper function to apply a 3x3 affine transformation matrix to a set of 2D points      
-def _apply_matrix(matrix: np.ndarray, points: Points2D) -> Points2D:
+# make it public function to apply a 3x3 affine transformation matrix to a set of 2D points     
+# using it for orientation matrix aswell 
+def apply_affine_matrix( matrix: np.ndarray, points: Points2D) -> Points2D:
     homogeneous = np.column_stack([
         points.xy,
         np.ones(len(points)),
@@ -166,7 +167,7 @@ def fit_affine(
     matrix[:2, :] = coefficients.T
     
     # this part is for the residuals, we can calculate the predicted destination points using the fitted matrix and then compute the residuals
-    predicted = _apply_matrix(
+    predicted = apply_affine_matrix(
     matrix,
     source,
     )
