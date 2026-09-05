@@ -72,6 +72,15 @@ class ModalityState:
             dtype=np.float64,
         )
     )
+    
+    rotation_base_image: np.ndarray | None = None
+
+    rotation_base_orientation_matrix: np.ndarray = field(
+        default_factory=lambda: np.eye(
+            3,
+            dtype=np.float64,
+        )
+    )
 
 
 

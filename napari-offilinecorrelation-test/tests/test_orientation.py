@@ -1,7 +1,17 @@
 import numpy as np
 
 from correlation2d3d.core.geometry import Points2D
-from correlation2d3d.core.orientation import flip_horizontal, horizontal_flip_matrix, apply_orientation_to_points,flip_vertical,vertical_flip_matrix
+from correlation2d3d.core.transform import apply_affine_matrix
+
+from correlation2d3d.core.orientation import (
+    flip_horizontal,
+    horizontal_flip_matrix,
+    apply_orientation_to_points,
+    flip_vertical,
+    vertical_flip_matrix,
+    rotation_canvas_shape,
+    rotation_matrix,
+)
 
 
 def test_flip_horizontal_moves_image_and_points_together():
@@ -163,4 +173,62 @@ def test_late_loaded_points_follow_vertical_flip():
     np.testing.assert_allclose(
         current_points.xy,
         expected,
+    )
+    
+def test_rotation_canvas_preserves_image_center_parity():
+    output_shape = rotation_canvas_shape(
+        height=3,
+        width=4,
+    )
+
+    assert output_shape == (5, 6)
+    
+def test_rotation_canvas_allows_integer_centering_for_mixed_parity_image():
+    height = 3
+    width = 4
+
+    output_height, output_width = rotation_canvas_shape(
+        height,
+        width,
+    )
+
+    source_cx = (width - 1) / 2.0
+    source_cy = (height - 1) / 2.0
+
+    output_cx = (output_width - 1) / 2.0
+    output_cy = (output_height - 1) / 2.0
+
+    offset_x = output_cx - source_cx
+    offset_y = output_cy - source_cy
+
+    assert output_height == 5
+    assert output_width == 6
+
+    assert offset_x == 1.0
+    assert offset_y == 1.0
+    
+def test_rotation_matrix_rotates_point_counterclockwise_about_center():
+    matrix, output_shape = rotation_matrix(
+        height=7,
+        width=7,
+        angle_degrees=90.0,
+    )
+
+    point = Points2D([
+        [5.0, 3.0],
+    ])
+
+    rotated = apply_affine_matrix(
+        matrix,
+        point,
+    )
+
+    assert output_shape == (7, 7)
+
+    np.testing.assert_allclose(
+        rotated.xy,
+        np.array([
+            [3.0, 1.0],
+        ]),
+        atol=1e-12,
     )

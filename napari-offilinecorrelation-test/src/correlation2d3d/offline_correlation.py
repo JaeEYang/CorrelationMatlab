@@ -17,10 +17,12 @@ from correlation2d3d.core.orientation import (
     flip_vertical,
     horizontal_flip_matrix,
     vertical_flip_matrix,
+    rotate_image,
+    prepare_rotation_canvas,
 )
 
 from correlation2d3d.core.transform import apply_affine_matrix, fit_affine, affine_xy_to_rc
-
+from qtpy.QtWidgets import QSlider, QDoubleSpinBox
 
 
 '''user clicks button
@@ -215,6 +217,46 @@ def make_offline_correlation_widget(viewer) -> Container:
     flip_flm_horizontal_button.enabled = False
     flip_tem_horizontal_button.enabled = False
     
+    flm_rotation = FloatSlider(
+        label="Rotate °",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        value=0.0,
+        readout=True,
+        tracking=False
+    )
+
+    tem_rotation = FloatSlider(
+        label="Rotate °",
+        min=-180.0,
+        max=180.0,
+        step=1.0,
+        value=0.0,
+        readout=True,
+        tracking=False
+    )
+    
+    flm_qslider = flm_rotation.native.findChild(
+    QSlider
+    )
+
+    flm_rotation_readout = flm_rotation.native.findChild(
+        QDoubleSpinBox
+    )
+
+    tem_qslider = tem_rotation.native.findChild(
+        QSlider
+    )
+
+    tem_rotation_readout = tem_rotation.native.findChild(
+        QDoubleSpinBox
+    )
+
+    flm_rotation.enabled = False
+    tem_rotation.enabled = False
+    
+
     # helper if layer exists we can remove it if not do nothing.
     def _remove_layer_if_present(
         layer_name: str,
@@ -272,9 +314,106 @@ def make_offline_correlation_widget(viewer) -> Container:
         _remove_layer_if_present(
             "Registered FLM"
         )
+        
+        # this is just a helpr to set 
+    def _set_modality_orientation(role: str, image: np.ndarray, orientation_matrix: np.ndarray) -> None:
+
+        modality = _get_modality(role)
+
+        modality.image = image
+        modality.orientation_matrix = orientation_matrix
+
+        #always rebuild current points from the
+        #orriginal landmarks.
+        if modality.original_points is not None:
+            modality.points = apply_affine_matrix(
+                modality.orientation_matrix,
+                modality.original_points,
+            )
+        else:
+            modality.points = None
+        # Update the image displayed by napari.
+        viewer.layers[role].data = modality.image
+
+        # Update landmark display if landmarks exist.
+        if modality.points is not None:
+            layer_name = f"{role} Landmarks"
+
+            try:
+                layer = viewer.layers[layer_name]
+            except KeyError:
+                pass
+            else:
+                layer.data = modality.points.to_rc()
+        # Registration referred to the previous
+         # orientation, so it is no longer valid.
+        _invalidate_registration()
     
     
-    # 
+    def _commit_rotation_baseline(role: str) -> None:
+
+        modality = _get_modality(role)
+
+        if modality.image is None:
+            return
+
+        modality.rotation_base_image = np.array(
+            modality.image,
+            copy=True,
+        )
+
+        modality.rotation_base_orientation_matrix = np.array(
+            modality.orientation_matrix,
+            dtype=np.float64,
+            copy=True,
+        )
+
+        if role == "FLM":
+            flm_rotation.value = 0.0
+        else:
+            tem_rotation.value = 0.0
+    
+    
+    
+    
+    def _update_rotation_readout(slider_widget,qslider,readout,position: int,) -> None:
+
+        native_min = qslider.minimum()
+        native_max = qslider.maximum()
+
+        if native_max == native_min:
+            return
+
+        fraction = (
+            (position - native_min)
+            / (native_max - native_min)
+        )
+
+        value = (
+            float(slider_widget.min)
+            + fraction
+            * (
+                float(slider_widget.max)
+                - float(slider_widget.min)
+            )
+        )
+
+        # Change only what is displayed.
+        # Do not tell magicgui that the value changed yet.
+        signals_were_blocked = readout.blockSignals(
+            True
+        )
+
+        readout.setValue(
+            value
+        )
+
+        readout.blockSignals(
+            signals_were_blocked
+        )
+    
+    
+    
     def _load_image( file_widget: FileEdit, role: str, status: Label) -> None:
         
         """Loads an image from a file path specified in the file_widget and updates the corresponding status label.
@@ -304,6 +443,9 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         image = _read_image(path) # read the image.
+        rotation_canvas, padding_matrix = (
+        prepare_rotation_canvas(image)
+        )
         
         
 
@@ -317,13 +459,25 @@ def make_offline_correlation_widget(viewer) -> Container:
             copy=True,
         )
         modality.image = np.array(
-            image,
+            rotation_canvas,
             copy=True,
         )
         # this resets the orintation back to identity incase user load the flm again after flip (reset-on-reload).
-        modality.orientation_matrix = np.eye(
-            3,
+        modality.orientation_matrix = np.array(
+            padding_matrix,
             dtype=np.float64,
+            copy=True,
+        )
+        # this is our base eye
+        modality.rotation_base_image = np.array(
+            rotation_canvas,
+            copy=True,
+        )
+
+        modality.rotation_base_orientation_matrix = np.array(
+            padding_matrix,
+            dtype=np.float64,
+            copy=True,
         )
         
         #landmarks belonged to the previous image.
@@ -359,6 +513,9 @@ def make_offline_correlation_widget(viewer) -> Container:
         if role == "FLM":
             flip_flm_horizontal_button.enabled = True
             flip_flm_vertical_button.enabled = True
+            
+            flm_rotation.enabled = True
+            flm_rotation.value = 0.0
 
             flm_points_status.value = (
                 "FLM landmarks: not loaded"
@@ -366,6 +523,9 @@ def make_offline_correlation_widget(viewer) -> Container:
         else:
             flip_tem_horizontal_button.enabled = True
             flip_tem_vertical_button.enabled = True
+            
+            tem_rotation.enabled = True
+            tem_rotation.value = 0.0
 
             tem_points_status.value = (
                 "TEM landmarks: not loaded"
@@ -510,6 +670,42 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         session.registration = registration
+        session.registration = registration
+
+        # Analyze rotation and affine skew
+        A = registration.matrix[:2, :2]
+
+        # direction of tranformed x 
+        horizontal_angle = np.degrees(
+            np.arctan2(-A[1, 0], A[0, 0])
+        )
+
+        vertical_angle = np.degrees(
+            np.arctan2(A[0, 1], A[1, 1])
+        )
+
+        angle_difference = (
+            vertical_angle - horizontal_angle
+        )
+
+        
+
+        print(
+            f"Horizontal direction: {horizontal_angle:.3f}°"
+        )
+        print(
+            f"Vertical direction: {vertical_angle:.3f}°"
+        )
+        print(
+            f"Axis-angle difference: {angle_difference:.3f}°"
+        )
+       
+
+        _update_warp_button()
+
+        predicted = registration.apply(
+            session.flm.points
+        )
         
         _update_warp_button() # this is where we enable it because now the registration is done. 
 
@@ -639,42 +835,19 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         modality = _get_modality(role)
 
-        modality.image = oriented_image
 
         # New operation happens AFTER all previous
         # orientation operations.
-        modality.orientation_matrix = (
+        new_orientation_matrix = (
             operation_matrix
             @ modality.orientation_matrix
         )
 
-        #always rebuild current points from the
-        #orriginal landmarks.
-        if modality.original_points is not None:
-            modality.points = apply_affine_matrix(
-                modality.orientation_matrix,
-                modality.original_points,
-            )
-        else:
-            modality.points = None
-
-        # Update the image displayed by napari.
-        viewer.layers[role].data = modality.image
-
-        # Update landmark display if landmarks exist.
-        if modality.points is not None:
-            layer_name = f"{role} Landmarks"
-
-            try:
-                layer = viewer.layers[layer_name]
-            except KeyError:
-                pass
-            else:
-                layer.data = modality.points.to_rc()
-
-        # Registration referred to the previous
-        # orientation, so it is no longer valid.
-        _invalidate_registration()
+        _set_modality_orientation(
+            role,
+            oriented_image,
+            new_orientation_matrix,
+        )
         
     #Figure out how to perform a horizontal flip.
     def _flip_modality_horizontal(role: str) -> None:
@@ -698,6 +871,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             flipped_image,
             operation_matrix,
         )
+        _commit_rotation_baseline(role)
         
     def _flip_modality_vertical(role: str) -> None:
         modality = _get_modality(role)
@@ -720,6 +894,8 @@ def make_offline_correlation_widget(viewer) -> Container:
             flipped_image,
             operation_matrix,
         )
+        # whatever orientation is on the screen right now is my new zero degree starint point
+        _commit_rotation_baseline(role)
                     
      # connect the button to the callback.   
     def _on_flip_flm_horizontal(event=None):
@@ -751,7 +927,69 @@ def make_offline_correlation_widget(viewer) -> Container:
     flip_tem_vertical_button.clicked.connect(
         _on_flip_tem_vertical
     )
+    
+    # this is essntially our rotation callback
+    def _set_modality_rotation(role: str, angle_degrees: float) -> None:
+
+        modality = _get_modality(role)
+
+        if modality.rotation_base_image is None:
+            return
+
+        rotated_image, rotation_operation = rotate_image(
+            modality.rotation_base_image,
+            angle_degrees,
+        )
+
+        orientation_matrix = (
+            rotation_operation
+            @ modality.rotation_base_orientation_matrix
+        )
+
+        _set_modality_orientation(
+            role,
+            rotated_image,
+            orientation_matrix,
+        )
         
+    def _on_flm_rotation_change(event=None):
+        _set_modality_rotation(
+            "FLM",
+            float(flm_rotation.value),
+        )
+
+
+    def _on_tem_rotation_change(event=None):
+        _set_modality_rotation(
+            "TEM",
+            float(tem_rotation.value),
+        )
+        
+    flm_rotation.changed.connect(
+        _on_flm_rotation_change
+    )
+
+    tem_rotation.changed.connect(
+        _on_tem_rotation_change
+    )
+    flm_qslider.sliderMoved.connect(
+        lambda position: _update_rotation_readout(
+            flm_rotation,
+            flm_qslider,
+            flm_rotation_readout,
+            position,
+        )
+    )
+
+    tem_qslider.sliderMoved.connect(
+        lambda position: _update_rotation_readout(
+            tem_rotation,
+            tem_qslider,
+            tem_rotation_readout,
+            position,
+        )
+    )
+            
     return Container(
         widgets=[
             Label(
@@ -762,7 +1000,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             load_flm_button,
             flm_status,
             flm_flip_row,
-
+            flm_rotation,
             flm_points_file,
             load_flm_points_button,
             flm_points_status,
@@ -772,7 +1010,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             load_tem_button,
             tem_status,
             tem_flip_row,
-
+            tem_rotation,
             tem_points_file,
             load_tem_points_button,
             tem_points_status,
