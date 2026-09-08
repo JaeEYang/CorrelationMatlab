@@ -73,6 +73,7 @@ class ModalityState:
         )
     )
     
+    # Fixed original padded image; flips and rotations never replace this baseline.
     rotation_base_image: np.ndarray | None = None
 
     rotation_base_orientation_matrix: np.ndarray = field(
@@ -81,6 +82,11 @@ class ModalityState:
             dtype=np.float64,
         )
     )
+
+    #rebuild from the baseline using this absolute angle, then display-axis flips.
+    rotation_angle: float = 0.0
+    horizontal_flipped: bool = False
+    vertical_flipped: bool = False
 
 
 

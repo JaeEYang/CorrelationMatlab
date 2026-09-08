@@ -113,6 +113,10 @@ def apply_orientation_to_points( points: Points2D, matrix: np.ndarray) -> Points
         transformed[:, :2]
     )
     
+    """
+    calculates a diagonal-based size and adjusts the odd/even dimensions
+    so the original image can be centered with integer pixel offsets.
+    """
 def rotation_canvas_shape( height: int, width: int) -> tuple[int, int]:
     # error handling
     if height <= 0 or width <= 0:
@@ -134,7 +138,7 @@ def rotation_canvas_shape( height: int, width: int) -> tuple[int, int]:
 
     # if one is even and other is odd and vice versa
     # then match the output height parity to the input height.
-    # we can also do the big wise operation here a bit too much though.
+    # we can also do the bit wise operation to make it faster ?
     if output_height % 2 != height % 2:
         output_height += 1
 
@@ -147,15 +151,15 @@ def rotation_canvas_shape( height: int, width: int) -> tuple[int, int]:
         output_width,
     )
 
-def prepare_rotation_canvas(
-    image: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
+# Why add this border? 
+# A rotated image can extend beyond its original rectangular bounds. The larger fixed canvas gives it room.
+def prepare_rotation_canvas( image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
     if image.ndim < 2:
         raise ValueError(
             "image must have at least two dimensions"
         )
-
+    # shape attributre returns tuple  (H,W,Channels)
     height, width = image.shape[:2]
 
     output_height, output_width = rotation_canvas_shape(
@@ -163,22 +167,24 @@ def prepare_rotation_canvas(
         width,
     )
 
-    # Because we matched odd/even parity,
-    # these offsets are guaranteed to be integers.
+    # Parity was matched in rotation_canvas_shape , so (output - input) is even and this
+    # division is exact, not rounding. Equal pad on both sides keeps the
+    # image center on the canvas center.
     offset_y = (output_height - height) // 2
     offset_x = (output_width - width) // 2
 
     canvas_shape = (
         output_height,
         output_width,
-        *image.shape[2:],
+        *image.shape[2:], # get the channels 
     )
 
     canvas = np.zeros(
         canvas_shape,
         dtype=image.dtype,
     )
-
+    
+    # copy the image data in middle of the cavas 
     canvas[
         offset_y:offset_y + height,
         offset_x:offset_x + width,
@@ -195,11 +201,8 @@ def prepare_rotation_canvas(
         padding_matrix,
     )
     
-def rotation_matrix(
-    height: int,
-    width: int,
-    angle_degrees: float,
-) -> tuple[np.ndarray, tuple[int, int]]:
+# shift the center to the origin, rotate, shift back
+def rotation_matrix( height: int,width: int,angle_degrees: float) -> tuple[np.ndarray, tuple[int, int]]:
 
     # We are ALREADY on the rotation-safe canvas.
     center_x = (width - 1) / 2.0
@@ -212,12 +215,14 @@ def rotation_matrix(
     cos_theta = np.cos(theta)
     sin_theta = np.sin(theta)
 
+
     translate_to_origin = np.array([
         [1.0, 0.0, -center_x],
         [0.0, 1.0, -center_y],
         [0.0, 0.0, 1.0],
     ], dtype=np.float64)
 
+ 
     rotate = np.array([
         [ cos_theta, sin_theta, 0.0],
         [-sin_theta, cos_theta, 0.0],
@@ -241,6 +246,8 @@ def rotation_matrix(
         (height, width),
     )
     
+    # rotation is bascially inverse warping , using the transformation matrix
+    # takes inputs as the image and the rotation angle in degrees
 def rotate_image(image: np.ndarray, angle_degrees: float,*, order: int = 1) -> tuple[np.ndarray, np.ndarray]:
 
     if image.ndim < 2:
@@ -275,3 +282,47 @@ def rotate_image(image: np.ndarray, angle_degrees: float,*, order: int = 1) -> t
         rotated_image,
         matrix,
     )
+
+
+""" 
+The inputs are:
+baseline: the fixed padded image.
+angle_degrees: the selected rotation.
+horizontal_flipped: whether to apply a horizontal flip.
+vertical_flipped: whether to apply a vertical flip.
+order: interpolation order used by rotation.
+The * means the arguments after it must be passed by name. e.g horizontal_flipped=True:
+"""
+def orient_image_from_baseline(
+    baseline: np.ndarray,
+    angle_degrees: float = 0.0,
+    *,
+    horizontal_flipped: bool = False,
+    vertical_flipped: bool = False,
+    order: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    
+    if baseline.ndim < 2:
+        raise ValueError("image must have at least two dimensions")
+    if not np.isfinite(angle_degrees):
+        raise ValueError("angle must be finite")
+
+    height, width = baseline.shape[:2]
+    image = baseline # image is baseline is true does not create copy
+    operation = np.eye(3, dtype=np.float64)
+
+    if angle_degrees != 0.0:
+        image, rotation = rotate_image(image, angle_degrees, order=order)
+        operation = rotation @ operation
+
+    if horizontal_flipped:
+        image, _ = flip_horizontal(image)
+        operation = horizontal_flip_matrix(width) @ operation
+    if vertical_flipped:
+        image, _ = flip_vertical(image)
+        operation = vertical_flip_matrix(height) @ operation
+
+    if image is baseline:
+        image = baseline.copy()
+
+    return image, operation 
