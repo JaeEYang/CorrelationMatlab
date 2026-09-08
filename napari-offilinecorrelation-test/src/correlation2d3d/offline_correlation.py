@@ -1,3 +1,9 @@
+"""
+offline_correlation.py
+    =
+GUI behavior
+"""
+
 from pathlib import Path
 
 import mrcfile
@@ -12,17 +18,7 @@ from correlation2d3d.offline_controller import OfflineCorrelationController
 from correlation2d3d.fileio.points_csv import read_points_csv
 
 from correlation2d3d.core.warp import warp_image
-
-from correlation2d3d.core.orientation import (
-    flip_horizontal,
-    flip_vertical,
-    horizontal_flip_matrix,
-    orient_image_from_baseline,
-    prepare_rotation_canvas,
-    vertical_flip_matrix,
-)
-
-from correlation2d3d.core.transform import apply_affine_matrix, fit_affine, affine_xy_to_rc
+from correlation2d3d.core.transform import fit_affine, affine_xy_to_rc
 from qtpy.QtWidgets import QSlider, QDoubleSpinBox
 
 
@@ -284,11 +280,9 @@ def make_offline_correlation_widget(viewer) -> Container:
             and session.tem.points is not None
         )
     
-    # lets say we did the registration and then changed the image orientation we should able to invalidate the old registraion matrix
-    # and also the warping becomes invalidated need to recalulate both 
+    # Invalidate the registion uses the method from controlled.
     def _invalidate_registration() -> None:
-        session.registration = None
-        session.warped_flm = None
+        controller.invalidate_registration()
 
         registration_status.value = (
             "Registration: not calculated"
@@ -300,20 +294,6 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         warp_button.enabled = False
         warped_opacity.enabled = False
-
-        # this removed those two layers aswell
-        controller._remove_layer_if_present(
-            "FLM Landmarks Registered to TEM"
-        )
-
-        controller._remove_layer_if_present(
-            "Warped FLM"
-        )
-        controller._remove_layer_if_present(
-            "Registered FLM"
-        )
-        
-        # this is just a helpr to set 
     
     
     # Display the stored settings without triggering another image update
@@ -340,7 +320,14 @@ def make_offline_correlation_widget(viewer) -> Container:
 
     
     
-    
+        """
+        FileEdit
+        validate path
+        _read_image()
+        controller.set_modality_image()
+        invalidate previous registration
+        update GUI 
+        """
     def _load_image( file_widget: FileEdit, role: str, status: Label) -> None:
         
         """Loads an image from a file path specified in the file_widget and updates the corresponding status label.
@@ -371,60 +358,9 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         image = _read_image(path) # read the image.
         
-        # orientation preparation begins here. creates space for later rotations
-        # returns two things, the padded image and matrix describing where the orginal image was placed.
-        rotation_canvas, padding_matrix = (
-        prepare_rotation_canvas(image)
-        )
-        
-        
-
-        #update the session object with the loaded image based on the role (FLM or TEM)
-        # Our session says: this exact NumPy array is the FLM image for this correlation job
-        modality = controller._get_modality(role)
-        
-        # Saves the copy of original image (the unpaded version)
-        modality.original_image = np.array(
+        controller.set_modality_image(
+            role,
             image,
-            copy=True, # independent pixel storage
-        )
-        # saves the copy of the image but places in the larged canvas to allow rotation
-        # this is the working image.
-        modality.image = np.array(
-            rotation_canvas,
-            copy=True, 
-        )
-        # Reloading the image clears orientation adjustments, but keeps the centering translation.
-        # save the current coordinate mapping which is padding.
-        modality.orientation_matrix = np.array(
-            padding_matrix,
-            dtype=np.float64,
-            copy=True,
-        )
-        # fixed starting image 
-        modality.rotation_base_image = np.array(
-            rotation_canvas,
-            copy=True,
-        )
-
-        #records how do I get from original image coordinates to this fixed baseline?
-        modality.rotation_base_orientation_matrix = np.array(
-            padding_matrix,
-            dtype=np.float64,
-            copy=True,
-        )
-        # currently want normal image
-        modality.rotation_angle = 0.0
-        modality.horizontal_flipped = False
-        modality.vertical_flipped = False
-        
-        #landmarks belonged to the previous image.
-        #the user must load/confirm landmarks for this image.
-        modality.original_points = None
-        modality.points = None
-        
-        controller._remove_layer_if_present(
-            f"{role} Landmarks"
         )
 
         #previous registration/warp can no longer
@@ -432,20 +368,11 @@ def make_offline_correlation_widget(viewer) -> Container:
         _invalidate_registration()
         _update_registration_button()
 
-        # Create or update the napari image layer.
-        # Recreate the layer so napari detects grayscale/RGB correctly.
-        controller._remove_layer_if_present(role)
-
-        # napari now has a layer nameed "role" showing padded image
-        viewer.add_image(
-            modality.image,
-            name=role,
-        )
-
         status.value = (
             f"{role}: {path.name} "
             f"{tuple(image.shape)}"
         )
+        
 
         # Orientation becomes available only after
         # an image has successfully loaded.
@@ -496,6 +423,13 @@ def make_offline_correlation_widget(viewer) -> Container:
         _on_load_tem
     )
 
+    """
+    validate CSV
+    read CSV
+    controller.set_original_points()
+    status
+    invalidate
+    """
     def _load_points( file_widget: FileEdit, role: str, status: Label) -> None:
         
         '''Loads points from a CSV file specified in the file_widget and updates the corresponding status label.
@@ -519,35 +453,11 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         points = read_points_csv(path)
         
-        # same as above udpdate the session object
-        modality = controller._get_modality(role)
-
-        modality.original_points = points # these belong to orginal unpadded image.
-        
-        # this is cool now if we upload the points after we have already flipped or rotated the image. 
-        # this will apply the correct tranformation to them aswell.
-        modality.points = apply_affine_matrix(
-        modality.orientation_matrix,
-        modality.original_points,
+        controller.set_original_points(
+            role,
+            points,
         )
-
-        layer_name = f"{role} Landmarks"
         
-        # convert to napari points convention y,x/ rc these will be recieved by napari frontend
-        napari_points = modality.points.to_rc() 
-        try:
-            layer = viewer.layers[layer_name]
-        except KeyError:
-            viewer.add_points(
-            napari_points,
-            name=layer_name,
-            size=32,
-            face_color="red",
-        )
-        else:
-            layer.data = napari_points
-            layer.size = 32
-            layer.face_color = "red"
 
         status.value = (
             f"{role} landmarks: "
@@ -555,7 +465,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             f"({len(points)} points)"
         )
         '''
-        So changing the inputs means:
+        So changing the inputs means
         the previous registration is no longer trustworthy.
         '''
         
@@ -772,109 +682,44 @@ def make_offline_correlation_widget(viewer) -> Container:
         _on_warped_opacity_change
     )
     
-    def _set_modality_orientation(role: str, image: np.ndarray, orientation_matrix: np.ndarray) -> None:
-        modality = controller._get_modality(role)
 
-        modality.image = image
-        modality.orientation_matrix = orientation_matrix
-
-        #always rebuild current points from the
-        #orriginal landmarks.
-        if modality.original_points is not None:
-            modality.points = apply_affine_matrix(
-                modality.orientation_matrix,
-                modality.original_points,
-            )
-        else:
-            modality.points = None
-        # Update the image displayed by napari.
-        viewer.layers[role].data = modality.image
-
-        # Update landmark display if landmarks exist.
-        if modality.points is not None:
-            layer_name = f"{role} Landmarks"
-
-            try:
-                layer = viewer.layers[layer_name]
-            except KeyError:
-                pass
-            else:
-                layer.data = modality.points.to_rc()
-        # Registration referred to the previous
-            # orientation, so it is no longer valid.
-        _invalidate_registration()
-
-    
-    # This helper has three main calls 
-    # 1) orient_image_from_baseline (returns the oriented image and the associated matrix)
-    # 2) _set_modality_orientation (this updates the session info, landmarks, layer data and invalidates the old registration )
-    # 3) _sync_orientation_controls
+    # this is just a wrapped around the controller rebuild function    
     def _rebuild_modality_from_baseline(role: str) -> None:
-        """Rebuild pixels and the original-to-working matrix from fixed settings."""
-        modality = controller._get_modality(role)
-        if modality.rotation_base_image is None:
-            return
-        print(f"the current rotation angle is {modality.rotation_angle}")
-        # get back the oriented image (for some θ )
-        # return the rotated image and the matrix mapping baseline coordinated to the newly oriented coordinates.
-        oriented_image, operation = orient_image_from_baseline(
-            modality.rotation_base_image, # fixed padded array
-            modality.rotation_angle, 
-            horizontal_flipped=modality.horizontal_flipped,
-            vertical_flipped=modality.vertical_flipped,
+        controller.rebuild_modality_from_baseline(
+            role
         )
-        # O = V @ H @ R @ P. 
-        # install the calculated results, update landmarks, and update layers.
-        _set_modality_orientation(
-            role,
-            oriented_image,
-            operation @ modality.rotation_base_orientation_matrix,
-        )
+
+        _invalidate_registration()
         _sync_orientation_controls(role)
         
     #Figure out how to perform a horizontal flip.
+    # All three function below are just wrappers now. real work in controller
     def _flip_modality_horizontal(role: str) -> None:
-        modality = controller._get_modality(role)
-
-        if modality.image is None:
-            return
-
-        # Reorder current pixels exactly; do not repeat rotation or change the baseline.
-        flipped_image, _ = flip_horizontal(modality.image)
-        orientation_matrix = (
-            horizontal_flip_matrix(modality.image.shape[1])
-            @ modality.orientation_matrix
+        controller.flip_modality_horizontal(
+            role
         )
-        modality.horizontal_flipped = not modality.horizontal_flipped # changes false to true (flipped)
-        _set_modality_orientation(role, flipped_image, orientation_matrix)
+
+        _invalidate_registration()
         _sync_orientation_controls(role)
         
+    
     def _flip_modality_vertical(role: str) -> None:
-        modality = controller._get_modality(role)
-
-        if modality.image is None:
-            return
-
-        # The image and original-to-working matrix receive the same display-axis flip.
-        flipped_image, _ = flip_vertical(modality.image)
-        orientation_matrix = (
-            vertical_flip_matrix(modality.image.shape[0])
-            @ modality.orientation_matrix
+        controller.flip_modality_vertical(
+            role
         )
-        modality.vertical_flipped = not modality.vertical_flipped
-        _set_modality_orientation(role, flipped_image, orientation_matrix)
+
+        _invalidate_registration()
         _sync_orientation_controls(role)
-
+        
     def _reset_modality_orientation(role: str) -> None:
-        modality = controller._get_modality(role)
-        if modality.rotation_base_image is None:
-            return
+        controller.reset_modality_orientation(
+            role
+        )
 
-        modality.rotation_angle = 0.0
-        modality.horizontal_flipped = False
-        modality.vertical_flipped = False
-        _rebuild_modality_from_baseline(role)
-
+        _invalidate_registration()
+        _sync_orientation_controls(role)
+        
+        
     reset_flm_orientation_button.clicked.connect(
         lambda event=None: _reset_modality_orientation("FLM")
     )
@@ -914,14 +759,17 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     # this is essntially our rotation callback
-    def _set_modality_rotation(role: str, angle_degrees: float) -> None:
-        modality = controller._get_modality(role) # get the session.flm or .tem 
+    def _set_modality_rotation(
+        role: str,
+        angle_degrees: float,
+    ) -> None:
+        controller.set_modality_rotation(
+            role,
+            angle_degrees,
+        )
 
-        if modality.rotation_base_image is None:
-            return
-
-        modality.rotation_angle = angle_degrees
-        _rebuild_modality_from_baseline(role)
+        _invalidate_registration()
+        _sync_orientation_controls(role)
         
     def _on_flm_rotation_change(event=None):
         _set_modality_rotation(
