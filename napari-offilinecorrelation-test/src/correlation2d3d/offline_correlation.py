@@ -7,6 +7,7 @@ from magicgui.widgets import Container, FileEdit, Label, PushButton, FloatSlider
 from skimage import io
 
 from correlation2d3d.session import CorrelationSession
+from correlation2d3d.offline_controller import OfflineCorrelationController
 
 from correlation2d3d.fileio.points_csv import read_points_csv
 
@@ -73,19 +74,11 @@ def make_offline_correlation_widget(viewer) -> Container:
     # he session is the memory of the current correlation job.
     session = CorrelationSession()
     
-    # this becomes out generic loader for modalities make it bit tidy to keep track of session state.
-    # retuns the correspoding state object
-    def _get_modality(role: str):
-        if role == "FLM":
-            return session.flm
-
-        if role == "TEM":
-            return session.tem
-
-        raise ValueError(
-            f"unknown modality role: {role}"
-        )
-
+    controller = OfflineCorrelationController(
+    viewer,
+    session,
+    )
+    
     flm_file = FileEdit(
         label="FLM Image",
         mode="r",
@@ -274,19 +267,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     tem_rotation.enabled = False
     for slider in (flm_rotation, tem_rotation):
         slider.tooltip = "Rotation from the original padded image, before selected display-axis flips."
-    
-
-    # helper if layer exists we can remove it if not do nothing.
-    def _remove_layer_if_present(layer_name: str) -> None:
-        try:
-            layer = viewer.layers[layer_name]
-        except KeyError:
-            return
-
-        viewer.layers.remove(layer)
-        
-    
-    
+     
     
     # a small helper to decide if warping is possible, do we have the images and the registration matrix.
     def _update_warp_button() -> None:
@@ -321,14 +302,14 @@ def make_offline_correlation_widget(viewer) -> Container:
         warped_opacity.enabled = False
 
         # this removed those two layers aswell
-        _remove_layer_if_present(
+        controller._remove_layer_if_present(
             "FLM Landmarks Registered to TEM"
         )
 
-        _remove_layer_if_present(
+        controller._remove_layer_if_present(
             "Warped FLM"
         )
-        _remove_layer_if_present(
+        controller._remove_layer_if_present(
             "Registered FLM"
         )
         
@@ -341,7 +322,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     # make the controls display what the session currently stores.
     def _sync_orientation_controls(role: str) -> None:
         
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
         if role == "FLM":
             slider = flm_rotation
             horizontal_button = flip_flm_horizontal_button
@@ -400,7 +381,7 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         #update the session object with the loaded image based on the role (FLM or TEM)
         # Our session says: this exact NumPy array is the FLM image for this correlation job
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
         
         # Saves the copy of original image (the unpaded version)
         modality.original_image = np.array(
@@ -442,7 +423,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         modality.original_points = None
         modality.points = None
         
-        _remove_layer_if_present(
+        controller._remove_layer_if_present(
             f"{role} Landmarks"
         )
 
@@ -453,7 +434,7 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         # Create or update the napari image layer.
         # Recreate the layer so napari detects grayscale/RGB correctly.
-        _remove_layer_if_present(role)
+        controller._remove_layer_if_present(role)
 
         # napari now has a layer nameed "role" showing padded image
         viewer.add_image(
@@ -539,7 +520,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         points = read_points_csv(path)
         
         # same as above udpdate the session object
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
 
         modality.original_points = points # these belong to orginal unpadded image.
         
@@ -711,7 +692,7 @@ def make_offline_correlation_widget(viewer) -> Container:
                 registration.matrix
             )
 
-            _remove_layer_if_present(
+            controller._remove_layer_if_present(
                 "Registered FLM"
             )
 
@@ -792,7 +773,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     def _set_modality_orientation(role: str, image: np.ndarray, orientation_matrix: np.ndarray) -> None:
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
 
         modality.image = image
         modality.orientation_matrix = orientation_matrix
@@ -830,7 +811,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     # 3) _sync_orientation_controls
     def _rebuild_modality_from_baseline(role: str) -> None:
         """Rebuild pixels and the original-to-working matrix from fixed settings."""
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
         if modality.rotation_base_image is None:
             return
         print(f"the current rotation angle is {modality.rotation_angle}")
@@ -853,7 +834,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         
     #Figure out how to perform a horizontal flip.
     def _flip_modality_horizontal(role: str) -> None:
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
 
         if modality.image is None:
             return
@@ -869,7 +850,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         _sync_orientation_controls(role)
         
     def _flip_modality_vertical(role: str) -> None:
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
 
         if modality.image is None:
             return
@@ -885,7 +866,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         _sync_orientation_controls(role)
 
     def _reset_modality_orientation(role: str) -> None:
-        modality = _get_modality(role)
+        modality = controller._get_modality(role)
         if modality.rotation_base_image is None:
             return
 
@@ -934,7 +915,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     
     # this is essntially our rotation callback
     def _set_modality_rotation(role: str, angle_degrees: float) -> None:
-        modality = _get_modality(role) # get the session.flm or .tem 
+        modality = controller._get_modality(role) # get the session.flm or .tem 
 
         if modality.rotation_base_image is None:
             return
@@ -969,14 +950,19 @@ def make_offline_correlation_widget(viewer) -> Container:
         native_min = qslider.minimum()
         native_max = qslider.maximum()
 
-        if native_max == native_min:
+        if native_max == native_min: # avoid diving by zero
             return
 
+        # what percentage of the way is slider from min to max  0.625 for 45 degree
         fraction = (
             (position - native_min)
             / (native_max - native_min)
         )
 
+        # and convert that to degrees
+        # if the rotation was 45 degree
+        #value = -180 + 0.625 * (180 - (-180)) = 45 
+       
         value = (
             float(slider_widget.min)
             + fraction
@@ -996,6 +982,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             value
         )
 
+        # allow the normal read out single again
         readout.blockSignals(
             signals_were_blocked
         )
