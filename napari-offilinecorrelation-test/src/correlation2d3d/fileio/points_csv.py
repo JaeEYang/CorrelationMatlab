@@ -24,7 +24,10 @@ convert yx → xy if requested
    ↓
 Points2D
 '''
-def read_points_csv(path: str | Path,*,order: Order = "xy") -> Points2D: # when called order must be specified explicitly, e.g read_points_csv(path, order="xy") 
+
+# order defaults to "xy".
+# If supplied, it must be passed by name, e.g. order="yx".
+def read_points_csv(path: str | Path,*,order: Order = "xy") -> Points2D: 
     """
     Read a CSV file containing 2D points and return them as a Points2D object.
 

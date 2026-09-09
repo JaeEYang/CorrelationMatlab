@@ -132,6 +132,7 @@ def apply_affine_matrix( matrix: np.ndarray, points: Points2D) -> Points2D:
     return Points2D(transformed[:, :2])
 
 # fit an affine transformation from source points to destination points
+# basically just does the least sqaure and solves for the tranformation that minimizes the error.
 def fit_affine(
     source: Points2D,
     destination: Points2D,

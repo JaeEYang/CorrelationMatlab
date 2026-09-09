@@ -110,7 +110,7 @@ class OfflineCorrelationController:
                 
     # This helper has two main calls 
     # 1) orient_image_from_baseline (returns the oriented image and the associated matrix)
-    # 2) set_modality_orientation (this updates the session info, landmarks, layer data and invalidates the old registration )
+    # 2) set_modality_orientation (this updates the session info, landmarks, layer data and invalidates the old registration (the wrapper does in the offline_correlation cause refactored!) )
     def rebuild_modality_from_baseline(
         self,
         role: str,

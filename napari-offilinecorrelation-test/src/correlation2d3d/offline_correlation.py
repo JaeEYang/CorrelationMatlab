@@ -205,9 +205,6 @@ def make_offline_correlation_widget(viewer) -> Container:
 
     flip_flm_horizontal_button.enabled = False
     flip_flm_vertical_button.enabled = False
-
-    flip_tem_horizontal_button.enabled = False
-    flip_tem_vertical_button.enabled = False
     
     flm_flip_row = Container(
         widgets=[
@@ -557,7 +554,6 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         session.registration = registration
-        session.registration = registration
 
         # Analyze rotation and affine skew
         A = registration.matrix[:2, :2]
@@ -587,12 +583,6 @@ def make_offline_correlation_widget(viewer) -> Container:
             f"Axis-angle difference: {angle_difference:.3f}°"
         )
        
-
-        _update_warp_button()
-
-        predicted = registration.apply(
-            session.flm.points
-        )
         
         _update_warp_button() # this is where we enable it because now the registration is done. 
 
@@ -715,17 +705,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     warped_opacity.changed.connect(
         _on_warped_opacity_change
     )
-    
-
-    # this is just a wrapped around the controller rebuild function    
-    def _rebuild_modality_from_baseline(role: str) -> None:
-        controller.rebuild_modality_from_baseline(
-            role
-        )
-
-        _invalidate_registration()
-        _sync_orientation_controls(role)
-        
+          
     #Figure out how to perform a horizontal flip.
     # All three function below are just wrappers now. real work in controller
     def _flip_modality_horizontal(role: str) -> None:
@@ -972,7 +952,7 @@ Place 2: Python/session
 
 After reading:
 
-session.flm_image
+session.flm.image
 
 might contain:
 
