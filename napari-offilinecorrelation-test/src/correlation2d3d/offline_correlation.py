@@ -12,6 +12,13 @@ from magicgui.widgets import Container, FileEdit, Label, PushButton, FloatSlider
 #It includes a label, file edit widgets for loading images and points, and push buttons for performing actions such as warping images and computing registrations.
 from skimage import io
 
+from qtpy.QtWidgets import (
+    QSlider,
+    QDoubleSpinBox,
+    QLineEdit,
+    QSizePolicy,
+)
+
 from correlation2d3d.session import CorrelationSession
 from correlation2d3d.offline_controller import OfflineCorrelationController
 
@@ -33,7 +40,7 @@ _on_load_flm()
 _load_image()
       ↓
 _read_image()
-      ↓
+      ↓        
 session + napari updated
 
 similar execution for other things aswell.
@@ -114,6 +121,8 @@ def make_offline_correlation_widget(viewer) -> Container:
         mode="r",
         filter="*.csv",
     )
+    
+    
 
     load_flm_points_button = PushButton(
         text="Load FLM Landmarks"
@@ -176,8 +185,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     flip_tem_vertical_button = PushButton(
         text="↕ V"
     )
-
-    # Checked buttons show which display-axis flips are currently selected.
+    
     for button in (
         flip_flm_horizontal_button,
         flip_flm_vertical_button,
@@ -185,12 +193,9 @@ def make_offline_correlation_widget(viewer) -> Container:
         flip_tem_vertical_button,
     ):
         button.native.setCheckable(True)
-        button.tooltip = "Toggle a flip along the displayed image axes, after rotation."
 
     reset_flm_orientation_button = PushButton(text="Reset Orientation", enabled=False)
     reset_tem_orientation_button = PushButton(text="Reset Orientation", enabled=False)
-    for button in (reset_flm_orientation_button, reset_tem_orientation_button):
-        button.tooltip = "Clear rotation and both flips; keep the loaded image and landmarks."
 
     flip_flm_horizontal_button.max_width = 70
     flip_flm_vertical_button.max_width = 70
@@ -261,8 +266,37 @@ def make_offline_correlation_widget(viewer) -> Container:
 
     flm_rotation.enabled = False
     tem_rotation.enabled = False
-    for slider in (flm_rotation, tem_rotation):
-        slider.tooltip = "Rotation from the original padded image, before selected display-axis flips."
+    
+    for file_widget in (
+        flm_file,
+        tem_file,
+        flm_points_file,
+        tem_points_file,
+    ):
+        line_edit = file_widget.native.findChild(QLineEdit)
+
+        if line_edit is not None:
+            line_edit.setMinimumWidth(100)
+
+            line_edit.setSizePolicy(
+                QSizePolicy.Ignored,
+                QSizePolicy.Fixed,
+            )
+
+
+    for status in (
+        flm_status,
+        tem_status,
+        flm_points_status,
+        tem_points_status,
+    ):
+        status.native.setMinimumWidth(0)
+        status.native.setSizePolicy(
+            QSizePolicy.Ignored,
+            QSizePolicy.Preferred,
+        )
+                    
+    
      
     
     # a small helper to decide if warping is possible, do we have the images and the registration matrix.
