@@ -8,8 +8,16 @@ from pathlib import Path
 
 import mrcfile
 import numpy as np
-from magicgui.widgets import Container, FileEdit, Label, PushButton, FloatSlider # This is a magicgui container that will hold the widgets for the offline correlation tool. 
-#It includes a label, file edit widgets for loading images and points, and push buttons for performing actions such as warping images and computing registrations.
+
+from magicgui.widgets import (
+    Container,
+    FileEdit,
+    Label,
+    PushButton,
+    FloatSlider,
+    ComboBox,
+)
+
 from skimage import io
 
 from qtpy.QtWidgets import (
@@ -17,6 +25,7 @@ from qtpy.QtWidgets import (
     QDoubleSpinBox,
     QLineEdit,
     QSizePolicy,
+    QFileDialog,
 )
 
 from correlation2d3d.session import CorrelationSession
@@ -27,6 +36,10 @@ from correlation2d3d.fileio.points_csv import read_points_csv
 from correlation2d3d.core.warp import warp_image
 from correlation2d3d.core.transform import fit_affine, affine_xy_to_rc
 from qtpy.QtWidgets import QSlider, QDoubleSpinBox
+
+from napari.layers import Points
+# can use later isinstance(layer, Points)
+
 
 
 '''user clicks button
@@ -82,6 +95,77 @@ def make_offline_correlation_widget(viewer) -> Container:
     session,
     )
     
+    # only return the layer if its actual points layer
+    # will return the name and also the object itself
+    # list with multiple tuples
+    def _get_points_layer_choices(widget=None):
+        return [
+            (layer.name, layer)
+            for layer in viewer.layers
+            if isinstance(layer, Points)
+        ]
+        
+    # create two dropdowns for each modality 
+    # mullable = True , means will accept "None" as valid value, cause initially there won't be any layer
+    flm_landmark_layer_combo = ComboBox(
+        label="FLM Landmark Layer",
+        choices=_get_points_layer_choices,
+        nullable=True,
+    )
+
+    tem_landmark_layer_combo = ComboBox(
+        label="TEM Landmark Layer",
+        choices=_get_points_layer_choices,
+        nullable=True,
+    )
+    
+
+    # need to tell the ComboBox: Something changed. Calculate your choices again.    
+    def _refresh_points_layer_choices(event=None):
+        flm_landmark_layer_combo.reset_choices()
+        tem_landmark_layer_combo.reset_choices()
+
+
+    def _on_points_layer_renamed(event=None):
+        _refresh_points_layer_choices()
+
+    # layer list inserted callback
+    def _on_layer_inserted(event):
+        layer = event.value # give me the actual layer object that was just added
+
+        if isinstance(layer, Points): # was the thing that was just inserted a Points layer?
+            layer.events.name.connect(
+                _on_points_layer_renamed
+            )
+
+        _refresh_points_layer_choices()
+
+
+    for layer in viewer.layers:
+        if isinstance(layer, Points):
+            layer.events.name.connect(
+                _on_points_layer_renamed
+            )
+
+
+    viewer.layers.events.inserted.connect(
+        _on_layer_inserted
+    )
+
+    viewer.layers.events.removed.connect(
+        _refresh_points_layer_choices
+    )
+    
+    def _debug_flm_landmark_choice(event=None):
+        print(
+            flm_landmark_layer_combo.value
+        )
+        
+    flm_landmark_layer_combo.changed.connect(
+        _debug_flm_landmark_choice
+    )
+    
+    
     flm_file = FileEdit(
         label="FLM Image",
         mode="r",
@@ -110,27 +194,25 @@ def make_offline_correlation_widget(viewer) -> Container:
         value="TEM: not loaded"
     )
     
-    flm_points_file = FileEdit(
-    label="FLM Landmarks",
-    mode="r",
-    filter="*.csv",
+    use_flm_landmarks_button = PushButton(
+        text="Use FLM Landmarks"
     )
 
-    tem_points_file = FileEdit(
-        label="TEM Landmarks",
-        mode="r",
-        filter="*.csv",
+    use_tem_landmarks_button = PushButton(
+        text="Use TEM Landmarks"
     )
     
     
-
-    load_flm_points_button = PushButton(
-        text="Load FLM Landmarks"
+    import_flm_points_button = PushButton(
+        text="Import FLM CSV"
     )
 
-    load_tem_points_button = PushButton(
-        text="Load TEM Landmarks"
+    import_tem_points_button = PushButton(
+        text="Import TEM CSV"
     )
+    
+    import_flm_points_button.enabled = False
+    import_tem_points_button.enabled = False
 
     flm_points_status = Label(
         value="FLM landmarks: not loaded"
@@ -139,6 +221,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     tem_points_status = Label(
         value="TEM landmarks: not loaded"
     )
+    
     
     calculate_registration_button = PushButton(
         text="Calculate Registration"
@@ -267,8 +350,6 @@ def make_offline_correlation_widget(viewer) -> Container:
     for file_widget in (
         flm_file,
         tem_file,
-        flm_points_file,
-        tem_points_file,
     ):
         line_edit = file_widget.native.findChild(QLineEdit)
 
@@ -293,8 +374,77 @@ def make_offline_correlation_widget(viewer) -> Container:
             QSizePolicy.Preferred,
         )
                     
+    pair_selected_button = PushButton(
+        text="Pair Selected Points"
+    )
+
+    pairing_status = Label(
+        value="Pairs: none"
+    )
     
-     
+    
+ 
+    def _use_landmark_layer(
+        combo: ComboBox,
+        role: str,
+        status: Label,
+    ) -> None:
+
+        layer = combo.value # get what the dropdown contains
+
+        # if nothing is selected
+        if layer is None:
+            status.value = (
+                f"{role} landmarks: choose a Points layer first"
+            )
+            return
+        
+        # where the actual coordinate logic happens.
+        # use FLM landmarks FLM session populated simillary for others aswell.,
+        try:
+            controller.use_points_layer(
+                role,
+                layer,
+            )
+        except ValueError as error:
+            status.value = (
+                f"{role} landmarks: {error}"
+            )
+            return
+
+        status.value = (
+            f"{role} landmarks: "
+            f"{layer.name} "
+            f"({len(layer.data)} points)"
+        )
+
+        _invalidate_registration() # invalidate as the points have changed 
+        _update_registration_button() # recheck if registration is now possible
+        
+    # wrapped for individual modalites
+    def _on_use_flm_landmarks(event=None):
+        _use_landmark_layer(
+            flm_landmark_layer_combo,
+            "FLM",
+            flm_points_status,
+        )
+
+
+    def _on_use_tem_landmarks(event=None):
+        _use_landmark_layer(
+            tem_landmark_layer_combo,
+            "TEM",
+            tem_points_status,
+        )
+    
+    # then connect
+    use_flm_landmarks_button.clicked.connect(
+        _on_use_flm_landmarks
+    )
+
+    use_tem_landmarks_button.clicked.connect(
+        _on_use_tem_landmarks
+    )
     
     # a small helper to decide if warping is possible, do we have the images and the registration matrix.
     def _update_warp_button() -> None:
@@ -413,6 +563,8 @@ def make_offline_correlation_widget(viewer) -> Container:
             reset_flm_orientation_button.enabled = True
             
             flm_rotation.enabled = True
+            
+            import_flm_points_button.enabled = True
 
             flm_points_status.value = (
                 "FLM landmarks: not loaded"
@@ -424,7 +576,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     
             
             tem_rotation.enabled = True
-
+            import_tem_points_button.enabled = True
             tem_points_status.value = (
                 "TEM landmarks: not loaded"
             )
@@ -453,78 +605,70 @@ def make_offline_correlation_widget(viewer) -> Container:
     load_tem_button.clicked.connect(
         _on_load_tem
     )
+    
+    def _import_points_csv(
+        role: str,
+        status: Label,
+        combo: ComboBox,
+    ) -> None:
 
-    """
-    validate CSV
-    read CSV
-    controller.set_original_points()
-    status
-    invalidate
-    """
-    def _load_points( file_widget: FileEdit, role: str, status: Label) -> None:
-        
-        '''Loads points from a CSV file specified in the file_widget and updates the corresponding status label.
-        The function checks if the file path is valid and reads the points using the read_points_csv function.
-        It then updates the CorrelationSession object with the loaded points and adds them to the napari viewer. 
-        If the file path is invalid or the file does not exist, it updates the status label accordingly.'''
-        
-        if not file_widget.value: # did the user actually choose anything?
+        # file name becomes a path
+        file_name, _ = QFileDialog.getOpenFileName(
+            None, # will pop up as standalone window
+            f"Import {role} landmark CSV",
+            "", # open in current working directory 
+            "CSV files (*.csv);;All files (*)", # just shows csv but provides dropdown option to see other files
+        )
+
+        if not file_name:
+            return
+
+        path = Path(file_name) # convert ot Path object
+
+        try:
+            points = read_points_csv(
+                path
+            )
+
+            layer = controller.create_points_layer_from_original_points(
+                role,
+                points,
+                name=f"{role} - {path.stem}", # e.g FLM - Item2_X7Y6_FLM_RegSpread9
+            )
+
+        except (ValueError, OSError) as error:
             status.value = (
-                f"{role} landmarks: choose a CSV first"
+                f"{role} landmarks: import failed: {error}"
             )
             return
 
-        path = Path(file_widget.value)  # get the path and make it Path object
-
-        if not path.is_file():
-            status.value = (
-                f"{role} landmarks: file does not exist"
-            )
-            return
-
-        points = read_points_csv(path)
-        
-        controller.set_original_points(
-            role,
-            points,
-        )
-        
-
-        status.value = (
-            f"{role} landmarks: "
-            f"{path.name} "
-            f"({len(points)} points)"
-        )
-        '''
-        So changing the inputs means
-        the previous registration is no longer trustworthy.
-        '''
-        
-        _invalidate_registration()
-        _update_registration_button()
-        
-    # connect the buttons load the points same as above
-    def _on_load_flm_points(event=None):
-        _load_points(
-            flm_points_file,
+        combo.value = layer # ComboBox stores actual layer objects.
+    
+    # wrappers for corresponding modalities
+    def _on_import_flm_points(event=None):
+        _import_points_csv(
             "FLM",
             flm_points_status,
+            flm_landmark_layer_combo,
         )
 
-    def _on_load_tem_points(event=None):
-        _load_points(
-            tem_points_file,
+
+    def _on_import_tem_points(event=None):
+        _import_points_csv(
             "TEM",
             tem_points_status,
+            tem_landmark_layer_combo,
         )
-    
-    load_flm_points_button.clicked.connect(
-        _on_load_flm_points
+        
+    import_flm_points_button.clicked.connect(
+        _on_import_flm_points
     )
 
-    load_tem_points_button.clicked.connect(
-        _on_load_tem_points
+    import_tem_points_button.clicked.connect(
+        _on_import_tem_points
     )
+
+    
     
     # the actual call back function when registration clicked on
     # this creates the tranformed layer basically.
@@ -532,6 +676,10 @@ def make_offline_correlation_widget(viewer) -> Container:
         # invalidate an old warp when recalculating registration
         session.warped_flm = None
         warp_status.value = "Warp: not calculated"
+        
+        # Add these two lines:
+        controller._remove_layer_if_present("Warped FLM")
+        warped_opacity.enabled = False
         
         if (
             session.flm.points is None
@@ -543,10 +691,16 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         try:
+            (
+                registration_flm_points,
+                registration_tem_points,
+            ) = controller.get_registration_landmarks()
+
             registration = fit_affine(
-                session.flm.points,
-                session.tem.points,
+                registration_flm_points,
+                registration_tem_points,
             )
+
         except ValueError as error:
             registration_status.value = (
                 f"Registration failed: {error}"
@@ -555,7 +709,7 @@ def make_offline_correlation_widget(viewer) -> Container:
 
         session.registration = registration
 
-        # Analyze rotation and affine skew
+        """ # Analyze rotation and affine skew
         A = registration.matrix[:2, :2]
 
         # direction of tranformed x 
@@ -581,13 +735,13 @@ def make_offline_correlation_widget(viewer) -> Container:
         )
         print(
             f"Axis-angle difference: {angle_difference:.3f}°"
-        )
+        )"""
        
         
         _update_warp_button() # this is where we enable it because now the registration is done. 
 
         predicted = registration.apply(
-            session.flm.points
+            registration_flm_points
         )
 
         transformed_layer_name = (
@@ -866,6 +1020,42 @@ def make_offline_correlation_widget(viewer) -> Container:
             position,
         )
     )
+    
+    
+    # this is just a wrapper
+    """
+    BUTTON
+    _on_pair_landmarks() 
+        asks
+    controller.pair_selected_landmarks()
+        returns 9
+    _on_pair_landmarks()
+    "Pairs: 9 paired landmarks"
+    """
+    
+    def _on_pair_selected_landmarks(event=None):
+
+        try:
+            pair_id = (
+                controller.pair_selected_landmarks()
+            )
+
+        except ValueError as error:
+            pairing_status.value = (
+                f"Pairs: {error}"
+            )
+            return
+
+        pairing_status.value = (
+            f"Created pair {pair_id}"
+        )
+
+        _invalidate_registration()
+        
+    
+    pair_selected_button.clicked.connect(
+        _on_pair_selected_landmarks
+    )
             
     return Container(
         widgets=[
@@ -879,9 +1069,12 @@ def make_offline_correlation_widget(viewer) -> Container:
             flm_flip_row,
             flm_rotation,
             reset_flm_orientation_button,
-            flm_points_file,
-            load_flm_points_button,
+            import_flm_points_button,
+            flm_landmark_layer_combo,
+            use_flm_landmarks_button,
             flm_points_status,
+            
+           
 
             # TEM
             tem_file,
@@ -890,17 +1083,21 @@ def make_offline_correlation_widget(viewer) -> Container:
             tem_flip_row,
             tem_rotation,
             reset_tem_orientation_button,
-            tem_points_file,
-            load_tem_points_button,
+            import_tem_points_button,
+            tem_landmark_layer_combo,
+            use_tem_landmarks_button,
             tem_points_status,
+            
+            pair_selected_button,
+            pairing_status,
 
             # Registration / warp
             calculate_registration_button,
             registration_status,
 
-            warp_button,
-            warp_status,
-            warped_opacity,
+            #warp_button,
+            #warp_status,
+            #warped_opacity,
             
         ]
     )

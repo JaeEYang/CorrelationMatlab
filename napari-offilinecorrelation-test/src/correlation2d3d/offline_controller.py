@@ -27,6 +27,13 @@ class OfflineCorrelationController:
     ):
         self.viewer = viewer
         self.session = session
+        
+        # this eventually means which points layer is currently being used for each modality cause there would be multiple csv, user
+        self._landmark_layers = {
+            "FLM": None,
+            "TEM": None,
+        }
+
 
     # this becomes out generic loader for modalities make it bit tidy to keep track of session state.
     # retuns the correspoding state object
@@ -71,7 +78,8 @@ class OfflineCorrelationController:
         self._remove_layer_if_present(
             "Registered FLM"
         )
-        
+    
+    # When orientation changes, transform the session coordinates and move the currently assigned Points layer.
     def set_modality_orientation(
         self,
         role: str,
@@ -97,14 +105,15 @@ class OfflineCorrelationController:
         self.viewer.layers[role].data = modality.image
 
         # Update landmark display if landmarks exist.
+       # Update landmark display if landmarks exist.
         if modality.points is not None:
-            layer_name = f"{role} Landmarks"
-
-            try:
-                layer = self.viewer.layers[layer_name]
-            except KeyError:
-                pass
-            else:
+            layer = self._landmark_layers[role] #which Points layer is currently assigned to this image?
+            
+            # maybe user will delete the layer later protects us from trying to update something that isn't displayed anymore.
+            if (
+                layer is not None
+                and layer in self.viewer.layers
+            ):
                 layer.data = modality.points.to_rc()
                 
                 
@@ -290,9 +299,7 @@ class OfflineCorrelationController:
         modality.original_points = None
         modality.points = None
 
-        self._remove_layer_if_present(
-            f"{role} Landmarks"
-        )
+        self._landmark_layers[role] = None
 
         # Create or update the napari image layer.
         # Recreate the layer so napari detects grayscale/RGB correctly.
@@ -304,29 +311,33 @@ class OfflineCorrelationController:
             name=role,
         )
         
-    def set_original_points(
+    
+        """
+    session modality.points
+            |
+            | .to_rc()
+            v
+    napari coordinates
+            |
+            v
+    FLM Landmarks / TEM Landmarks layer
+        """
+    def _update_landmark_layer(
         self,
-        role: str,
-        points: Points2D,
+        role:str,
     ) -> None:
-
-        #update the session object
+        
+        #session object (session.flm or .tem)
         modality = self._get_modality(role)
-
-        modality.original_points = points # these belong to orginal unpadded image.
-
-        # this is cool now if we upload the points after we have already flipped or rotated the image.
-        # this will apply the correct tranformation to them aswell.
-        modality.points = apply_affine_matrix(
-            modality.orientation_matrix,
-            modality.original_points,
-        )
-
+        
+        if modality.points is None:
+            return
+        
         layer_name = f"{role} Landmarks"
-
+        
         # convert to napari points convention y,x/ rc these will be recieved by napari frontend
         napari_points = modality.points.to_rc()
-
+        
         try:
             layer = self.viewer.layers[layer_name]
         except KeyError:
@@ -340,3 +351,385 @@ class OfflineCorrelationController:
             layer.data = napari_points
             layer.size = 32
             layer.face_color = "red"
+        
+
+        """
+        CSV
+        Points2D
+        transform points to current image orientation
+        napari Points layer
+        
+        Convert an original-coordinate CSV into a normal napari Points candidate.
+        """
+    def create_points_layer_from_original_points(
+        self,
+        role: str,
+        points: Points2D,
+        name: str,
+    ):
+        modality = self._get_modality(role)
+
+        if modality.image is None:
+            raise ValueError(
+                f"{role} image must be loaded before importing landmarks"
+            )
+
+        working_points = apply_affine_matrix(
+            modality.orientation_matrix,
+            points,
+        )
+
+        layer = self.viewer.add_points(
+            working_points.to_rc(),
+            name=name,
+            size=32,
+            face_color="red",
+        )
+
+        return layer
+        
+        
+    
+    # When the user selected a points layer 
+    #  the ui will call controller.use_points_layer ("FLM", selected_layer)
+    # Take an existing napari Points layer and assign it as FLM/TEM landmarks.
+    def use_points_layer(
+        self,
+        role: str,
+        layer,
+    ) -> None:
+
+        # get the correct modality (session.flm or .tem)
+        modality = self._get_modality(role)
+
+        #make sure the image exits
+        if modality.image is None:
+            raise ValueError(
+                f"{role} image must be loaded before assigning landmarks"
+            )
+
+        # read the points layer actual data (this is gonna be y,x would have to convert)
+        layer_data = np.asarray(
+            layer.data
+        )
+
+        # make sure the data is 2D N points × 2 coordinates 
+        if (
+            layer_data.ndim != 2
+            or layer_data.shape[1] != 2
+        ):
+            raise ValueError(
+                "landmark Points layer must contain 2D coordinates"
+            )
+
+        # convert into our internal xy convention
+        working_points = Points2D.from_rc(
+            layer_data
+        )
+
+        # these are already working coordinates (image could have been rotated flipped and then points were selected padded -> rotated 30°-> horizontally flipped)
+        modality.points = working_points
+
+        # to get the og we need to get the inverse of the orientation matrix
+        inverse_orientation = np.linalg.inv(
+            modality.orientation_matrix
+        )
+
+        # apply the inverse and after that is can just follow the same path as csv
+        modality.original_points = apply_affine_matrix(
+            inverse_orientation,
+            modality.points,
+        )
+
+        # remeber which napari layer is active  
+        self._landmark_layers[role] = layer
+        
+    
+    
+    # look at the currently selected flm point and and currectly selected tem point, and give  those two points the same new pair_id
+        """
+        get active FLM layer
+        get active TEM layer
+            next    
+        make sure both exist
+            next
+        ask each layer:
+        "Which points are selected?"
+                
+        require exactly ONE selected in each
+                
+        find a new unused pair ID
+                
+        assign that same ID to both selected points
+                
+        display that ID beside both points
+                
+        """
+    #  it would return the newly created pair number
+    def pair_selected_landmarks(
+        self,
+    ) -> int:
+        
+        print("i am in this function")
+        
+        flm_layer = self._landmark_layers["FLM"]
+        tem_layer = self._landmark_layers["TEM"]
+        
+        if flm_layer is None or tem_layer is None:
+            raise ValueError(
+                "assign both FLM and TEM landmark layers first"
+            )
+        
+        # these are the points that are currently selected in the napari
+        # we wanna make sure only one each layer
+        flm_selected = list(flm_layer.selected_data)
+        tem_selected = list(tem_layer.selected_data)
+        
+        if len(flm_selected) != 1:
+            raise ValueError(
+                "select exactly one FLM landmark"
+            )
+            
+        if len(tem_selected) != 1:
+            raise ValueError(
+                "select exactly one TEM landmark"
+            )
+        # get the index of each
+        
+        flm_index = flm_selected[0]
+        tem_index = tem_selected[0]
+        
+        # keep the track so we can answer what pair numbers have already been used, so what number should I use next?
+        existing_pair_ids = []
+        
+        # look through both FLM and TEM metadata.
+        for layer in (
+            flm_layer,
+            tem_layer,
+        ):
+            features = layer.features # get the layers metadata table (features)
+
+            if "pair_id" in features: # does it have a column named "pair_id"
+                for pair_id in features["pair_id"]:
+                    if str(pair_id).strip():
+                        existing_pair_ids.append(int(pair_id))
+                        
+
+        # find the next id that we will assign to the pair
+        next_pair_id = (max(existing_pair_ids, default=0) + 1)
+        
+
+        # make a copy cause we are going to modify it later put it back
+        flm_features = flm_layer.features.copy()
+        tem_features = tem_layer.features.copy()
+
+        # if pair_id column does not exist yet then create it based on however many points we have fill it wi ""
+        if "pair_id" not in flm_features:
+            flm_features["pair_id"] = [
+                ""
+            ] * len(flm_layer.data)
+
+        if "pair_id" not in tem_features:
+            tem_features["pair_id"] = [
+                ""
+            ] * len(tem_layer.data)
+
+        # give me the FLM pair_id column as a mumpy array that I can easily edit by point index
+        flm_pair_ids = np.asarray(
+            flm_features["pair_id"],
+            dtype=object,
+        ).copy()
+
+        tem_pair_ids = np.asarray(
+            tem_features["pair_id"],
+            dtype=object,
+        ).copy()
+
+        # where the actual pairing happens flm_pair_ids[2] = "1"
+        flm_pair_ids[flm_index] = str(
+            next_pair_id
+        )
+
+        tem_pair_ids[tem_index] = str(
+            next_pair_id
+        )
+
+        #puts those modified arrays back into our feature-table copies.
+        flm_features["pair_id"] = flm_pair_ids
+        tem_features["pair_id"] = tem_pair_ids
+
+        #give the updated feature tables back to napari
+        flm_layer.features = flm_features
+        tem_layer.features = tem_features
+
+        # visually show pair id
+        flm_layer.text = "{pair_id}"
+        tem_layer.text = "{pair_id}"
+
+        return next_pair_id
+    
+    # helper function For this Points layer, where is each explicit pair ID located?
+    # input: napari layer
+    # output: dictionary key  = pair ID , value = point index
+    def _get_pair_index_map(self, layer) -> dict[int,int]:
+        
+        # create dic to hold 
+        pair_index_map = {}
+        
+        # if the feature does not exist 
+        if "pair_id" not in layer.features:
+            return pair_index_map
+
+        for index, pair_id in enumerate(
+            layer.features["pair_id"]
+        ):
+            pair_id_text = str(pair_id).strip()
+
+            if not pair_id_text:
+                continue
+
+            pair_id_number = int(pair_id_text)
+
+            if pair_id_number in pair_index_map:
+                raise ValueError(
+                    f"pair ID {pair_id_number} appears more than once "
+                    f"in {layer.name}"
+                )
+
+            # do the actual mapping
+            pair_index_map[pair_id_number] = index
+
+        return pair_index_map
+            
+    
+    
+    """
+    
+    this function sits between napari landmark layer and the fit_affine
+    Its only job is to prepare two correctly corresponding Points2D objects.  
+    
+    Example without pairing:
+
+    FLM                    TEM
+
+    index 0                index 0
+    index 1                index 1
+    index 2                index 2
+    index 3                index 3
+
+    returns everything normally.
+
+    Example with explicit pairing:
+
+    FLM                         TEM
+
+    index 0 pair 2              index 0 pair 3
+    index 1 unpaired            index 1 pair 1
+    index 2 pair 1              index 2 pair 2
+    index 3 pair 3
+
+    The function reconstructs:
+
+    Registration FLM        Registration TEM
+
+    pair 1: FLM index 2     pair 1: TEM index 1
+    pair 2: FLM index 0     pair 2: TEM index 2
+    pair 3: FLM index 3     pair 3: TEM index 0
+
+    Now fit_affine() receives rows that truly correspond.
+            
+    """
+    def get_registration_landmarks(self):
+
+        # get the active layers
+        flm_layer = self._landmark_layers["FLM"]
+        tem_layer = self._landmark_layers["TEM"]
+
+        # error handeling
+        if flm_layer is None or tem_layer is None:
+            raise ValueError(
+                "assign both FLM and TEM landmark layers first"
+            )
+
+        # refresh current coordinates
+        self.use_points_layer(
+            "FLM",
+            flm_layer,
+        )
+
+        self.use_points_layer(
+            "TEM",
+            tem_layer,
+        )
+
+        # look for pair_id metadata
+        flm_pair_map = self._get_pair_index_map(
+            flm_layer
+        )
+
+        tem_pair_map = self._get_pair_index_map(
+            tem_layer
+        )
+
+        # no explicit pairs
+        if not flm_pair_map and not tem_pair_map:
+
+            if len(self.session.flm.points.xy) != len(
+                self.session.tem.points.xy
+            ):
+                raise ValueError(
+                    "FLM and TEM must have the same number of landmarks"
+                )
+
+            # return all points in their existing order
+            return (
+                self.session.flm.points,
+                self.session.tem.points,
+            )
+
+        
+        #explicit pairs exist
+        
+        common_pair_ids = sorted(
+            set(flm_pair_map)
+            & set(tem_pair_map)
+        )
+
+        if len(common_pair_ids) < 3:
+            raise ValueError(
+                "explicit correspondence requires at least 3 matched pairs"
+            )
+
+        # match pair IDs
+        flm_indices = [
+            flm_pair_map[pair_id]
+            for pair_id in common_pair_ids
+        ]
+
+        tem_indices = [
+            tem_pair_map[pair_id]
+            for pair_id in common_pair_ids
+        ]
+
+        flm_points = Points2D(
+            self.session.flm.points.xy[
+                flm_indices
+            ]
+        )
+
+        tem_points = Points2D(
+            self.session.tem.points.xy[
+                tem_indices
+            ]
+        )
+
+        #   return only corresponding points in pair-ID order
+        return (
+            flm_points,
+            tem_points,
+        )
+                
+        
+        
+        
+            
