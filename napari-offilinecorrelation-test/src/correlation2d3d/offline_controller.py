@@ -6,7 +6,10 @@ application behavior
 import numpy as np
 
 from correlation2d3d.session import CorrelationSession
-from correlation2d3d.core.transform import apply_affine_matrix
+from correlation2d3d.core.transform import (
+    apply_affine_matrix,
+    Registration2D,
+)
 from correlation2d3d.core.orientation import (
     flip_horizontal,
     flip_vertical,
@@ -15,8 +18,11 @@ from correlation2d3d.core.orientation import (
     prepare_rotation_canvas,
     vertical_flip_matrix,
 )
+from correlation2d3d.core.warp import warp_image
 
 from correlation2d3d.core.geometry import Points2D
+import imageio.v3 as iio
+import tifffile
 
 class OfflineCorrelationController:
 
@@ -87,6 +93,19 @@ class OfflineCorrelationController:
         orientation_matrix: np.ndarray,
     ) -> None:
         modality = self._get_modality(role)
+        
+        #  Which napari Points layer are we currently using for this modality?
+        layer = self._landmark_layers[role]
+        
+        # Only synchronize if an active layer actually exists and hasn't been deleted from napari.
+        if (
+            layer is not None
+            and layer in self.viewer.layers
+        ):   
+            self.use_points_layer( # synchronize
+                role,
+                layer,
+            )
 
         modality.image = image
         modality.orientation_matrix = orientation_matrix
@@ -130,8 +149,6 @@ class OfflineCorrelationController:
 
         if modality.rotation_base_image is None:
             return
-
-        print(f"the current rotation angle is {modality.rotation_angle}")
 
         #get back the oriented image (for some θ )
         # return the rotated image and the matrix mapping baseline coordinated to the newly oriented coordinates.
@@ -311,47 +328,6 @@ class OfflineCorrelationController:
             name=role,
         )
         
-    
-        """
-    session modality.points
-            |
-            | .to_rc()
-            v
-    napari coordinates
-            |
-            v
-    FLM Landmarks / TEM Landmarks layer
-        """
-    def _update_landmark_layer(
-        self,
-        role:str,
-    ) -> None:
-        
-        #session object (session.flm or .tem)
-        modality = self._get_modality(role)
-        
-        if modality.points is None:
-            return
-        
-        layer_name = f"{role} Landmarks"
-        
-        # convert to napari points convention y,x/ rc these will be recieved by napari frontend
-        napari_points = modality.points.to_rc()
-        
-        try:
-            layer = self.viewer.layers[layer_name]
-        except KeyError:
-            self.viewer.add_points(
-                napari_points,
-                name=layer_name,
-                size=32,
-                face_color="red",
-            )
-        else:
-            layer.data = napari_points
-            layer.size = 32
-            layer.face_color = "red"
-        
 
         """
         CSV
@@ -470,8 +446,7 @@ class OfflineCorrelationController:
         self,
     ) -> int:
         
-        print("i am in this function")
-        
+       
         flm_layer = self._landmark_layers["FLM"]
         tem_layer = self._landmark_layers["TEM"]
         
@@ -728,8 +703,318 @@ class OfflineCorrelationController:
             flm_points,
             tem_points,
         )
-                
         
         
+    # Where does the Registered FLM currently map its pixel coordinates into napari world coordinates?
+    # data_to_world method in napari layer Converts from data coordinates to world coordinates.
+    def get_registered_flm_transform_rc(
+        self,
+    ) -> np.ndarray:
+
+        try:
+            layer = self.viewer.layers[
+                "Registered FLM"
+            ]
+        except KeyError:
+            raise ValueError(
+                "Registered FLM does not exist"
+            )
+
+        origin = np.asarray(
+            layer.data_to_world(
+                (0.0, 0.0)
+            ),
+            dtype=np.float64,
+        )
+
+        row_point = np.asarray(
+            layer.data_to_world(
+                (1.0, 0.0)
+            ),
+            dtype=np.float64,
+        )
+
+        column_point = np.asarray(
+            layer.data_to_world(
+                (0.0, 1.0)
+            ),
+            dtype=np.float64,
+        )
+
+        row_direction = (
+            row_point - origin
+        )
+
+        column_direction = (
+            column_point - origin
+        )
+
+        return np.array([
+            [
+                row_direction[0],
+                column_direction[0],
+                origin[0],
+            ],
+            [
+                row_direction[1],
+                column_direction[1],
+                origin[1],
+            ],
+            [
+                0.0,
+                0.0,
+                1.0,
+            ],
+        ], dtype=np.float64)
         
-            
+    """
+        
+    1. Get current Registered FLM image data
+
+    2. Read its CURRENT napari transform
+    including manual movement / rotation / scale
+
+    3. Convert napari (row, column) matrix
+    into our core (x, y) convention
+
+    4. Use existing warp_image()
+    to place FLM pixels onto TEM-sized canvas
+    """
+    def get_registered_flm_on_tem_grid(
+        self,
+    ) -> np.ndarray:
+
+        if self.session.tem.image is None:
+            raise ValueError(
+                "TEM image must be loaded before creating the registered FLM"
+            )
+
+        try:
+            registered_flm_layer = self.viewer.layers[
+                "Registered FLM"
+            ]
+        except KeyError:
+            raise ValueError(
+                "Registered FLM does not exist"
+            )
+
+        current_transform_rc = (
+            self.get_registered_flm_transform_rc()
+        )
+
+        swap_rc_xy = np.array([
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+
+        current_transform_xy = (
+            swap_rc_xy
+            @ current_transform_rc
+            @ swap_rc_xy
+        )
+
+        current_registration = Registration2D(
+            matrix=current_transform_xy
+        )
+
+        registered_flm = warp_image(
+            np.asarray(
+                registered_flm_layer.data
+            ),
+            current_registration,
+            output_shape=self.session.tem.image.shape[:2],
+            order=0,
+        )
+
+        return registered_flm.astype(
+            np.float32,
+            copy=False,
+        )
+        
+    def save_scientific_tiff(
+        self,
+        path: str,
+    ) -> None:
+
+        if self.session.tem.image is None:
+            raise ValueError(
+                "TEM image must be loaded before saving"
+            )
+
+        if self.session.flm.image is None:
+            raise ValueError(
+                "FLM image must be loaded before saving"
+            )
+
+        tem = np.asarray(
+            self.session.tem.image
+        )
+
+        registered_flm = (
+            self.get_registered_flm_on_tem_grid()
+        )
+
+
+        with tifffile.TiffWriter(
+            path
+        ) as tif:
+
+            tif.write(
+                tem,
+                photometric="minisblack",
+                compression=None,
+                description="TEM",
+            )
+
+            if (
+                registered_flm.ndim == 3
+                and registered_flm.shape[-1] in (3, 4)
+            ):
+                tif.write(
+                    registered_flm,
+                    photometric="rgb",
+                    compression=None,
+                    description="Registered FLM",
+                )
+
+            elif registered_flm.ndim == 2:
+                tif.write(
+                    registered_flm,
+                    photometric="minisblack",
+                    compression=None,
+                    description="Registered FLM",
+                )
+
+            else:
+                raise ValueError(
+                    "registered FLM must be grayscale or RGB"
+                )
+        
+    def capture_visual_overlay(
+        self,
+    ) -> np.ndarray:
+
+        try:
+            tem_layer = self.viewer.layers[
+                "TEM"
+            ]
+
+            registered_flm_layer = self.viewer.layers[
+                "Registered FLM"
+            ]
+
+        except KeyError:
+            raise ValueError(
+                "TEM and Registered FLM must exist before exporting"
+            )
+
+        # remebers the currenct state
+        visibility = {
+            layer: layer.visible
+            for layer in self.viewer.layers
+        }
+
+        # temporarily makes the viewer: TEM = ON Registered FLM  = ON , everything else OFF
+        try:
+            for layer in self.viewer.layers:
+                layer.visible = (
+                    layer is tem_layer
+                    or layer is registered_flm_layer
+                )
+
+            overlay = self.viewer.export_figure(
+                scale_factor=1,
+                flash=False,
+            )
+
+        finally:
+            for layer, was_visible in visibility.items():
+                layer.visible = was_visible
+
+        return overlay
+    
+    def save_visual_overlay(
+    self,
+    path: str,
+) -> None:
+        #gets the actual rendered image.
+        overlay = self.capture_visual_overlay()
+
+        lower_path = path.lower()
+
+        if lower_path.endswith(
+            (".tif", ".tiff")
+        ):
+            tifffile.imwrite(
+                path,
+                overlay,
+                compression=None,
+                photometric="rgb",
+            )
+
+        elif lower_path.endswith(".png"):
+            iio.imwrite(
+                path,
+                overlay,
+            )
+
+        elif lower_path.endswith(
+            (".jpg", ".jpeg")
+        ):
+            rgb_overlay = overlay[..., :3]
+
+            iio.imwrite(
+                path,
+                rgb_overlay,
+                quality=95,
+            )
+
+        else:
+            raise ValueError(
+                "visual overlay must be TIFF, PNG, or JPEG"
+            )
+                    
+                        
+        
+    # it opens the special two-series scientific TIFF 
+    # that our program created and displays both series correctly in napari.
+    def open_scientific_tiff(
+        self,
+        path: str,
+    ) -> None:
+
+        with tifffile.TiffFile(
+            path
+        ) as tif:
+
+            if len(tif.series) < 2:
+                raise ValueError(
+                    "scientific TIFF must contain TEM and Registered FLM series"
+                )
+
+            tem = tif.series[0].asarray()
+            flm = tif.series[1].asarray()
+
+        self._remove_layer_if_present(
+            "Scientific TEM"
+        )
+
+        self._remove_layer_if_present(
+            "Scientific Registered FLM"
+        )
+
+        self.viewer.add_image(
+            tem,
+            name="Scientific TEM",
+            colormap="gray",
+        )
+
+        self.viewer.add_image(
+            flm / 255.0,
+            name="Scientific Registered FLM",
+            rgb=True,
+            opacity=0.5,
+            blending="translucent",
+            contrast_limits=(0.0, 1.0),
+        )

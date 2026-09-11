@@ -103,7 +103,9 @@ class CorrelationSession:
         default_factory=ModalityState
     )
     registration: Registration2D | None = None
-    warped_flm: np.ndarray | None = None
+   
+
+    warped_flm: np.ndarray | None = None #(need to figure the why warped layer is very bright. currect displaying the registered layer directly)
     
     
 """ 

@@ -19,6 +19,8 @@ dependencies = [
   "mrcfile",
   "magicgui",
   "qtpy",
+  "imageio",
+  "tifffile",
 ]
 
 [project.optional-dependencies]

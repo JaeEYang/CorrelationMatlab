@@ -33,9 +33,7 @@ from correlation2d3d.offline_controller import OfflineCorrelationController
 
 from correlation2d3d.fileio.points_csv import read_points_csv
 
-from correlation2d3d.core.warp import warp_image
 from correlation2d3d.core.transform import fit_affine, affine_xy_to_rc
-from qtpy.QtWidgets import QSlider, QDoubleSpinBox
 
 from napari.layers import Points
 # can use later isinstance(layer, Points)
@@ -156,16 +154,6 @@ def make_offline_correlation_widget(viewer) -> Container:
         _refresh_points_layer_choices
     )
     
-    def _debug_flm_landmark_choice(event=None):
-        print(
-            flm_landmark_layer_combo.value
-        )
-        
-    flm_landmark_layer_combo.changed.connect(
-        _debug_flm_landmark_choice
-    )
-    
-    
     flm_file = FileEdit(
         label="FLM Image",
         mode="r",
@@ -233,24 +221,6 @@ def make_offline_correlation_widget(viewer) -> Container:
         value="Registration: not calculated"
     )
     
-    warp_button = PushButton(
-        text="Warp FLM to TEM"
-    )
-
-    warp_button.enabled = False
-
-    warp_status = Label(
-        value="Warp: not calculated"
-    )
-    
-    warped_opacity = FloatSlider(
-        label = "Warped FLM Opacity",
-        min = 0.0,
-        max = 1.0,
-        step = 0.05,
-        value = 0.5
-    )
-    warped_opacity.enabled = False
     
     # ascii-exempt: Qt widget label, rendered by the GUI and never written to stdout
     flip_flm_horizontal_button = PushButton(
@@ -270,12 +240,13 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     for button in (
-        flip_flm_horizontal_button,
-        flip_flm_vertical_button,
-        flip_tem_horizontal_button,
-        flip_tem_vertical_button,
+    flip_flm_horizontal_button,
+    flip_flm_vertical_button,
+    flip_tem_horizontal_button,
+    flip_tem_vertical_button,
     ):
         button.native.setCheckable(True)
+        button.enabled = False
 
     reset_flm_orientation_button = PushButton(text="Reset Orientation", enabled=False)
     reset_tem_orientation_button = PushButton(text="Reset Orientation", enabled=False)
@@ -286,8 +257,6 @@ def make_offline_correlation_widget(viewer) -> Container:
     flip_tem_horizontal_button.max_width = 70
     flip_tem_vertical_button.max_width = 70
 
-    flip_flm_horizontal_button.enabled = False
-    flip_flm_vertical_button.enabled = False
     
     flm_flip_row = Container(
         widgets=[
@@ -305,8 +274,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         layout="horizontal",
     )
 
-    flip_flm_horizontal_button.enabled = False
-    flip_tem_horizontal_button.enabled = False
+    
     
     flm_rotation = FloatSlider(
         label="Rotate °",
@@ -347,33 +315,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     flm_rotation.enabled = False
     tem_rotation.enabled = False
     
-    for file_widget in (
-        flm_file,
-        tem_file,
-    ):
-        line_edit = file_widget.native.findChild(QLineEdit)
-
-        if line_edit is not None:
-            line_edit.setMinimumWidth(100)
-
-            line_edit.setSizePolicy(
-                QSizePolicy.Ignored,
-                QSizePolicy.Fixed,
-            )
-
-
-    for status in (
-        flm_status,
-        tem_status,
-        flm_points_status,
-        tem_points_status,
-    ):
-        status.native.setMinimumWidth(0)
-        status.native.setSizePolicy(
-            QSizePolicy.Ignored,
-            QSizePolicy.Preferred,
-        )
-                    
+    
     pair_selected_button = PushButton(
         text="Pair Selected Points"
     )
@@ -383,7 +325,57 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     
- 
+    save_scientific_tiff_button = PushButton(
+        text="Save Scientific TIFF"
+    )
+    open_scientific_tiff_button = PushButton(
+        text="Open Scientific TIFF"
+    )
+
+    export_status = Label(
+        value=""
+    )
+    
+    
+    for file_widget in (
+            flm_file,
+            tem_file,
+        ):
+            line_edit = file_widget.native.findChild(QLineEdit)
+    
+            if line_edit is not None:
+                line_edit.setMinimumWidth(100)
+    
+                line_edit.setSizePolicy(
+                    QSizePolicy.Ignored,
+                    QSizePolicy.Fixed,
+                )
+    
+    
+    
+                        
+
+    save_visual_overlay_button = PushButton(
+        text="Save Visual Overlay"
+    )
+
+    visual_export_status = Label(
+        value="Visual export: not saved"
+    )
+    
+    for status in (
+            flm_status,
+            tem_status,
+            flm_points_status,
+            tem_points_status,
+            export_status,
+            visual_export_status,
+        ):
+            status.native.setMinimumWidth(0)
+            status.native.setSizePolicy(
+                QSizePolicy.Ignored,
+                QSizePolicy.Preferred,
+            )
     def _use_landmark_layer(
         combo: ComboBox,
         role: str,
@@ -446,13 +438,6 @@ def make_offline_correlation_widget(viewer) -> Container:
         _on_use_tem_landmarks
     )
     
-    # a small helper to decide if warping is possible, do we have the images and the registration matrix.
-    def _update_warp_button() -> None:
-        warp_button.enabled = (
-            session.flm.image is not None
-            and session.tem.image is not None
-            and session.registration is not None
-        )
     
     # enable the registration buttion is both flm and tem data exist in the session this gets populated in the _load_points
     def _update_registration_button() -> None:
@@ -468,13 +453,6 @@ def make_offline_correlation_widget(viewer) -> Container:
         registration_status.value = (
             "Registration: not calculated"
         )
-
-        warp_status.value = (
-            "Warp: not calculated"
-        )
-
-        warp_button.enabled = False
-        warped_opacity.enabled = False
     
     
     # Display the stored settings without triggering another image update
@@ -673,13 +651,6 @@ def make_offline_correlation_widget(viewer) -> Container:
     # the actual call back function when registration clicked on
     # this creates the tranformed layer basically.
     def _on_calculate_registration(event=None):
-        # invalidate an old warp when recalculating registration
-        session.warped_flm = None
-        warp_status.value = "Warp: not calculated"
-        
-        # Add these two lines:
-        controller._remove_layer_if_present("Warped FLM")
-        warped_opacity.enabled = False
         
         if (
             session.flm.points is None
@@ -737,8 +708,6 @@ def make_offline_correlation_widget(viewer) -> Container:
             f"Axis-angle difference: {angle_difference:.3f}°"
         )"""
        
-        
-        _update_warp_button() # this is where we enable it because now the registration is done. 
 
         predicted = registration.apply(
             registration_flm_points
@@ -791,74 +760,13 @@ def make_offline_correlation_widget(viewer) -> Container:
                 opacity=0.5,
                 blending="translucent",
             )
+            
+
         
     calculate_registration_button.clicked.connect(
         _on_calculate_registration
     )
     
-    def _on_warp(event=None):
-        if (
-            session.flm.image is None
-            or session.tem.image is None
-            or session.registration is None
-        ):
-            warp_status.value = (
-                "Warp: load images and calculate registration first"
-            )
-            return
-        #
-        #suppose FLM is (732,782,2) and TEM (2046, 2880) then output shape is (2046, 2880)
-        #Take the FLM image, transform it using the FLM -> TEM registration, and create the result on a 2046 × 2880 TEM-sized canvas.
-        # Because the FLM is RGB the result should be Warped FLM (2046, 2880, 3)
-        warped = warp_image(
-            session.flm.image,
-            session.registration,
-            output_shape=session.tem.image.shape[:2],
-        )
-
-        session.warped_flm = warped
-
-        layer_name = "Warped FLM"
-
-        try:
-            layer = viewer.layers[layer_name]
-        except KeyError:
-            viewer.add_image(
-                warped,
-                name=layer_name,
-                opacity=float(warped_opacity.value), # can change the opacity based on slider
-                blending="translucent",
-            )
-        else:
-            layer.data = warped
-            layer.opacity = float(
-            warped_opacity.value
-            )
-        
-        # The warp has now succeeded
-        warped_opacity.enabled = True
-        
-        warp_status.value = (
-            f"Warped FLM: {tuple(warped.shape)}"
-        )
-        
-    warp_button.clicked.connect(
-    _on_warp
-    )
-    
-    # callback for the Warped Opactiy
-    def _on_warped_opacity_change(event = None):
-        
-        try:
-            layer = viewer.layers["Warped FLM"]
-        except KeyError:
-            return
-        layer.opacity = float(
-            warped_opacity.value
-        )
-    warped_opacity.changed.connect(
-        _on_warped_opacity_change
-    )
           
     #Figure out how to perform a horizontal flip.
     # All three function below are just wrappers now. real work in controller
@@ -1056,7 +964,133 @@ def make_offline_correlation_widget(viewer) -> Container:
     pair_selected_button.clicked.connect(
         _on_pair_selected_landmarks
     )
-            
+    
+    
+    
+    def _on_save_scientific_tiff(event=None):
+
+        path, _ = QFileDialog.getSaveFileName(
+            None,
+            "Save Scientific TIFF",
+            "registered_scientific.tif",
+            "TIFF files (*.tif *.tiff)",
+        )
+
+        if not path:
+            return
+
+        if not path.lower().endswith(
+            (".tif", ".tiff")
+        ):
+            path += ".tif"
+
+        try:
+            controller.save_scientific_tiff(
+                path
+            )
+
+        except ValueError as error:
+            export_status.value = (
+                f"Export failed: {error}"
+            )
+            return
+
+        export_status.value = (
+            f"Saved: {path}"
+        )
+
+
+    save_scientific_tiff_button.clicked.connect(
+        _on_save_scientific_tiff
+    )
+    
+    def _on_save_visual_overlay(event=None):
+
+        path, selected_filter = (
+            QFileDialog.getSaveFileName(
+                None,
+                "Save Visual Overlay",
+                "registered_overlay.tif",
+                (
+                    "TIFF (*.tif *.tiff);;"
+                    "PNG (*.png);;"
+                    "JPEG (*.jpg *.jpeg)"
+                ),
+            )
+        )
+
+        if not path:
+            return
+
+        lower_path = path.lower()
+
+        if not lower_path.endswith(
+            (
+                ".tif",
+                ".tiff",
+                ".png",
+                ".jpg",
+                ".jpeg",
+            )
+        ):
+            if selected_filter.startswith(
+                "PNG"
+            ):
+                path += ".png"
+
+            elif selected_filter.startswith(
+                "JPEG"
+            ):
+                path += ".jpg"
+
+            else:
+                path += ".tif"
+
+        try:
+            controller.save_visual_overlay(
+                path
+            )
+
+        except ValueError as error:
+            visual_export_status.value = (
+                f"Visual export failed: {error}"
+            )
+            return
+
+        visual_export_status.value = (
+            f"Saved: {path}"
+        )
+
+
+    save_visual_overlay_button.clicked.connect(
+        _on_save_visual_overlay
+    )
+    
+    # This GUI callback's only job is to ask the user which TIFF they want to open and pass that path to the controller.
+    def _on_open_scientific_tiff(
+        event=None,
+    ):
+        path, _ = QFileDialog.getOpenFileName(
+            None,
+            "Open Scientific TIFF",
+            "",
+            "TIFF files (*.tif *.tiff)",
+        )
+        if not path:
+            return
+        try:
+            controller.open_scientific_tiff(path)
+        except (ValueError, OSError) as error:
+            export_status.value = (f"Open failed: {error}")
+            return
+
+        export_status.value = (f"Opened: {path}")
+
+
+    open_scientific_tiff_button.clicked.connect(
+        _on_open_scientific_tiff
+    )
+                
     return Container(
         widgets=[
             Label(
@@ -1094,11 +1128,18 @@ def make_offline_correlation_widget(viewer) -> Container:
             # Registration / warp
             calculate_registration_button,
             registration_status,
-
-            #warp_button,
-            #warp_status,
-            #warped_opacity,
             
+          
+            
+            save_scientific_tiff_button,
+            open_scientific_tiff_button,
+            export_status,
+            
+            
+            
+            save_visual_overlay_button,
+            visual_export_status,
+
         ]
     )
         
