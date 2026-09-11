@@ -8,21 +8,18 @@ import numpy as np
 from correlation2d3d.session import CorrelationSession
 from correlation2d3d.core.transform import (
     apply_affine_matrix,
+    affine_xy_to_rc,
     Registration2D,
 )
 from correlation2d3d.core.orientation import (
-    flip_horizontal,
-    flip_vertical,
-    horizontal_flip_matrix,
-    orient_image_from_baseline,
-    prepare_rotation_canvas,
-    vertical_flip_matrix,
+    orientation_matrix_from_settings,
 )
 from correlation2d3d.core.warp import warp_image
 
 from correlation2d3d.core.geometry import Points2D
 import imageio.v3 as iio
 import tifffile
+import json
 
 class OfflineCorrelationController:
 
@@ -86,10 +83,10 @@ class OfflineCorrelationController:
         )
     
     # When orientation changes, transform the session coordinates and move the currently assigned Points layer.
+    # pixels unchanged napari renderer will move the image
     def set_modality_orientation(
         self,
         role: str,
-        image: np.ndarray,
         orientation_matrix: np.ndarray,
     ) -> None:
         modality = self._get_modality(role)
@@ -107,8 +104,11 @@ class OfflineCorrelationController:
                 layer,
             )
 
-        modality.image = image
-        modality.orientation_matrix = orientation_matrix
+        modality.orientation_matrix = np.array(
+            orientation_matrix,
+            dtype=np.float64,
+            copy=True,
+        )
 
         #always rebuild current points from the
         #orriginal landmarks.
@@ -119,9 +119,13 @@ class OfflineCorrelationController:
             )
         else:
             modality.points = None
+            
+        image_layer = self.viewer.layers[role]
 
-        # Update the image displayed by napari.
-        self.viewer.layers[role].data = modality.image
+
+        image_layer.affine = affine_xy_to_rc(
+            modality.orientation_matrix
+        )
 
         # Update landmark display if landmarks exist.
        # Update landmark display if landmarks exist.
@@ -139,32 +143,39 @@ class OfflineCorrelationController:
     # This helper has two main calls 
     # 1) orient_image_from_baseline (returns the oriented image and the associated matrix)
     # 2) set_modality_orientation (this updates the session info, landmarks, layer data and invalidates the old registration (the wrapper does in the offline_correlation cause refactored!) )
+    # going to keep this function name temporarily, even though "baseline" is becoming a misleading name. That minimizes how much code we change in one pass.
     def rebuild_modality_from_baseline(
         self,
         role: str,
     ) -> None:
-        """Rebuild pixels and the original-to-working matrix from fixed settings."""
 
         modality = self._get_modality(role)
 
-        if modality.rotation_base_image is None:
+        if modality.image is None:
             return
 
-        #get back the oriented image (for some θ )
-        # return the rotated image and the matrix mapping baseline coordinated to the newly oriented coordinates.
-        oriented_image, operation = orient_image_from_baseline(
-            modality.rotation_base_image, # fixed padded array
-            modality.rotation_angle,
-            horizontal_flipped=modality.horizontal_flipped,
-            vertical_flipped=modality.vertical_flipped,
+        height, width = (
+            modality.image.shape[:2]
         )
 
-        # O = V @ H @ R @ P. 
-        # install the calculated results, update landmarks, and update layers.
+        # get the setting and save to matrix 
+        orientation_matrix = (
+            orientation_matrix_from_settings(
+                height,
+                width,
+                modality.rotation_angle,
+                horizontal_flipped=(
+                    modality.horizontal_flipped
+                ),
+                vertical_flipped=(
+                    modality.vertical_flipped
+                ),
+            )
+        )
+
         self.set_modality_orientation(
             role,
-            oriented_image,
-            operation @ modality.rotation_base_orientation_matrix,
+            orientation_matrix,
         )
         
     #  horizontal flip 
@@ -173,25 +184,18 @@ class OfflineCorrelationController:
         self,
         role: str,
     ) -> None:
+
         modality = self._get_modality(role)
 
         if modality.image is None:
             return
 
-        # Reorder current pixels exactly; do not repeat rotation or change the baseline.
-        flipped_image, _ = flip_horizontal(modality.image)
-
-        orientation_matrix = (
-            horizontal_flip_matrix(modality.image.shape[1])
-            @ modality.orientation_matrix
+        modality.horizontal_flipped = (
+            not modality.horizontal_flipped
         )
 
-        modality.horizontal_flipped = not modality.horizontal_flipped # changes false to true (flipped)
-
-        self.set_modality_orientation(
-            role,
-            flipped_image,
-            orientation_matrix,
+        self.rebuild_modality_from_baseline(
+            role
         )
         
     # veritcal flip 
@@ -199,25 +203,18 @@ class OfflineCorrelationController:
         self,
         role: str,
     ) -> None:
+
         modality = self._get_modality(role)
 
         if modality.image is None:
             return
 
-        # The image and original-to-working matrix receive the same display-axis flip.
-        flipped_image, _ = flip_vertical(modality.image)
-
-        orientation_matrix = (
-            vertical_flip_matrix(modality.image.shape[0])
-            @ modality.orientation_matrix
+        modality.vertical_flipped = (
+            not modality.vertical_flipped
         )
 
-        modality.vertical_flipped = not modality.vertical_flipped
-
-        self.set_modality_orientation(
-            role,
-            flipped_image,
-            orientation_matrix,
+        self.rebuild_modality_from_baseline(
+            role
         )
         
     # this just resets eveything to beginning!
@@ -227,7 +224,7 @@ class OfflineCorrelationController:
     ) -> None:
         modality = self._get_modality(role)
 
-        if modality.rotation_base_image is None:
+        if modality.image is None:
             return
 
         modality.rotation_angle = 0.0
@@ -246,7 +243,7 @@ class OfflineCorrelationController:
     ) -> None:
         modality = self._get_modality(role) # get the session.flm or .tem 
 
-        if modality.rotation_base_image is None:
+        if modality.image is None:
             return
 
         modality.rotation_angle = angle_degrees
@@ -262,11 +259,6 @@ class OfflineCorrelationController:
         image: np.ndarray,
     ) -> None:
 
-        # orientation preparation begins here. creates space for later rotations
-        # returns two things, the padded image and matrix describing where the orginal image was placed.
-        rotation_canvas, padding_matrix = (
-            prepare_rotation_canvas(image)
-        )
 
         #update the session object with the loaded image based on the role (FLM or TEM)
         # Our session says: this exact NumPy array is the FLM image for this correlation job
@@ -281,29 +273,30 @@ class OfflineCorrelationController:
         # saves the copy of the image but places in the larged canvas to allow rotation
         # this is the working image.
         modality.image = np.array(
-            rotation_canvas,
+            image,
             copy=True,
         )
 
         # Reloading the image clears orientation adjustments, but keeps the centering translation.
         # save the current coordinate mapping which is padding.
-        modality.orientation_matrix = np.array(
-            padding_matrix,
+        modality.orientation_matrix = np.eye(
+            3,
             dtype=np.float64,
-            copy=True,
         )
+
 
         # fixed starting image
         modality.rotation_base_image = np.array(
-            rotation_canvas,
+            image,
             copy=True,
         )
 
         #records how do I get from original image coordinates to this fixed baseline?
-        modality.rotation_base_orientation_matrix = np.array(
-            padding_matrix,
-            dtype=np.float64,
-            copy=True,
+        modality.rotation_base_orientation_matrix = (
+            np.eye(
+                3,
+                dtype=np.float64,
+            )
         )
 
         # currently want normal image
@@ -767,26 +760,13 @@ class OfflineCorrelationController:
             ],
         ], dtype=np.float64)
         
-    """
-        
-    1. Get current Registered FLM image data
-
-    2. Read its CURRENT napari transform
-    including manual movement / rotation / scale
-
-    3. Convert napari (row, column) matrix
-    into our core (x, y) convention
-
-    4. Use existing warp_image()
-    to place FLM pixels onto TEM-sized canvas
-    """
-    def get_registered_flm_on_tem_grid(
+    def get_registered_images_on_common_grid(
         self,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
 
         if self.session.tem.image is None:
             raise ValueError(
-                "TEM image must be loaded before creating the registered FLM"
+                "TEM image must be loaded before creating the registered images"
             )
 
         try:
@@ -798,7 +778,20 @@ class OfflineCorrelationController:
                 "Registered FLM does not exist"
             )
 
-        current_transform_rc = (
+        tem = np.asarray(
+            self.session.tem.image
+        )
+
+        flm = np.asarray(
+            registered_flm_layer.data
+        )
+
+        tem_transform_xy = np.asarray(
+            self.session.tem.orientation_matrix,
+            dtype=np.float64,
+        )
+
+        flm_transform_rc = (
             self.get_registered_flm_transform_rc()
         )
 
@@ -808,89 +801,258 @@ class OfflineCorrelationController:
             [0.0, 0.0, 1.0],
         ], dtype=np.float64)
 
-        current_transform_xy = (
+        flm_transform_xy = (
             swap_rc_xy
-            @ current_transform_rc
+            @ flm_transform_rc
             @ swap_rc_xy
         )
 
-        current_registration = Registration2D(
-            matrix=current_transform_xy
+        tem_height, tem_width = tem.shape[:2]
+
+        tem_corners = Points2D(
+            np.array([
+                [0.0, 0.0],
+                [tem_width - 1.0, 0.0],
+                [0.0, tem_height - 1.0],
+                [tem_width - 1.0, tem_height - 1.0],
+            ], dtype=np.float64)
+        )
+
+        flm_height, flm_width = flm.shape[:2]
+
+        flm_corners = Points2D(
+            np.array([
+                [0.0, 0.0],
+                [flm_width - 1.0, 0.0],
+                [0.0, flm_height - 1.0],
+                [flm_width - 1.0, flm_height - 1.0],
+            ], dtype=np.float64)
+        )
+
+        transformed_tem_corners = (
+            apply_affine_matrix(
+                tem_transform_xy,
+                tem_corners,
+            )
+        )
+
+        transformed_flm_corners = (
+            apply_affine_matrix(
+                flm_transform_xy,
+                flm_corners,
+            )
+        )
+
+        all_corners = np.vstack([
+            transformed_tem_corners.xy,
+            transformed_flm_corners.xy,
+        ])
+
+        min_x = np.floor(
+            all_corners[:, 0].min()
+        )
+
+        min_y = np.floor(
+            all_corners[:, 1].min()
+        )
+
+        max_x = np.ceil(
+            all_corners[:, 0].max()
+        )
+
+        max_y = np.ceil(
+            all_corners[:, 1].max()
+        )
+
+        output_width = int(
+            max_x - min_x + 1
+        )
+
+        output_height = int(
+            max_y - min_y + 1
+        )
+
+        common_shift = np.array([
+            [1.0, 0.0, -min_x],
+            [0.0, 1.0, -min_y],
+            [0.0, 0.0, 1.0],
+        ], dtype=np.float64)
+
+        tem_to_common = (
+            common_shift
+            @ tem_transform_xy
+        )
+
+        flm_to_common = (
+            common_shift
+            @ flm_transform_xy
+        )
+
+        output_shape = (
+            output_height,
+            output_width,
+        )
+
+        registered_tem = warp_image(
+            tem,
+            Registration2D(
+                matrix=tem_to_common
+            ),
+            output_shape=output_shape,
+            order=1,
         )
 
         registered_flm = warp_image(
-            np.asarray(
-                registered_flm_layer.data
+            flm,
+            Registration2D(
+                matrix=flm_to_common
             ),
-            current_registration,
-            output_shape=self.session.tem.image.shape[:2],
-            order=0,
+            output_shape=output_shape,
+            order=1,
         )
 
-        return registered_flm.astype(
-            np.float32,
-            copy=False,
-        )
+        if np.issubdtype(
+            tem.dtype,
+            np.integer,
+        ):
+            tem_info = np.iinfo(
+                tem.dtype
+            )
+
+            registered_tem = np.clip(
+                np.rint(registered_tem),
+                tem_info.min,
+                tem_info.max,
+            ).astype(
+                tem.dtype
+            )
+
+        else:
+            registered_tem = (
+                registered_tem.astype(
+                    tem.dtype,
+                    copy=False,
+                )
+            )
+
+        if np.issubdtype(
+            flm.dtype,
+            np.integer,
+        ):
+            flm_info = np.iinfo(
+                flm.dtype
+            )
+
+            registered_flm = np.clip(
+                np.rint(registered_flm),
+                flm_info.min,
+                flm_info.max,
+            ).astype(
+                flm.dtype
+            )
+
+        else:
+            registered_flm = (
+                registered_flm.astype(
+                    flm.dtype,
+                    copy=False,
+                )
+            )
+
+        return (
+            registered_tem,
+            registered_flm,
+        )    
+    
         
     def save_scientific_tiff(
         self,
         path: str,
     ) -> None:
 
-        if self.session.tem.image is None:
-            raise ValueError(
-                "TEM image must be loaded before saving"
-            )
-
-        if self.session.flm.image is None:
-            raise ValueError(
-                "FLM image must be loaded before saving"
-            )
-
-        tem = np.asarray(
-            self.session.tem.image
+        (
+            registered_tem,
+            registered_flm,
+        ) = (
+            self.get_registered_images_on_common_grid()
         )
 
-        registered_flm = (
-            self.get_registered_flm_on_tem_grid()
+        if registered_tem.ndim == 2:
+            registered_tem = np.repeat(
+                registered_tem[..., np.newaxis],
+                3,
+                axis=-1,
+            )
+
+        if registered_flm.ndim == 2:
+            registered_flm = np.repeat(
+                registered_flm[..., np.newaxis],
+                3,
+                axis=-1,
+            )
+
+        registered_tem = registered_tem[..., :3]
+        registered_flm = registered_flm[..., :3]
+
+        scientific_stack = np.stack(
+            [
+                registered_tem,
+                registered_flm,
+            ],
+            axis=0,
+        )
+
+        tifffile.imwrite(
+            path,
+            scientific_stack,
+            photometric="rgb",
+            compression=None,
         )
 
 
-        with tifffile.TiffWriter(
+    def open_scientific_tiff(
+        self,
+        path: str,
+    ) -> None:
+
+        with tifffile.TiffFile(
             path
         ) as tif:
+            stack = tif.asarray()
 
-            tif.write(
-                tem,
-                photometric="minisblack",
-                compression=None,
-                description="TEM",
+        if (
+            stack.ndim != 4
+            or stack.shape[0] != 2
+            or stack.shape[-1] != 3
+        ):
+            raise ValueError(
+                "scientific TIFF must contain two RGB registered images"
             )
 
-            if (
-                registered_flm.ndim == 3
-                and registered_flm.shape[-1] in (3, 4)
-            ):
-                tif.write(
-                    registered_flm,
-                    photometric="rgb",
-                    compression=None,
-                    description="Registered FLM",
-                )
+        tem = stack[0]
+        flm = stack[1]
 
-            elif registered_flm.ndim == 2:
-                tif.write(
-                    registered_flm,
-                    photometric="minisblack",
-                    compression=None,
-                    description="Registered FLM",
-                )
+        self._remove_layer_if_present(
+            "Scientific TEM"
+        )
 
-            else:
-                raise ValueError(
-                    "registered FLM must be grayscale or RGB"
-                )
-        
+        self._remove_layer_if_present(
+            "Scientific Registered FLM"
+        )
+
+        self.viewer.add_image(
+            tem,
+            name="Scientific TEM",
+            rgb=True,
+        )
+
+        self.viewer.add_image(
+            flm,
+            name="Scientific Registered FLM",
+            rgb=True,
+            opacity=0.5,
+            blending="translucent",
+        )
     def capture_visual_overlay(
         self,
     ) -> np.ndarray:
@@ -976,45 +1138,3 @@ class OfflineCorrelationController:
             )
                     
                         
-        
-    # it opens the special two-series scientific TIFF 
-    # that our program created and displays both series correctly in napari.
-    def open_scientific_tiff(
-        self,
-        path: str,
-    ) -> None:
-
-        with tifffile.TiffFile(
-            path
-        ) as tif:
-
-            if len(tif.series) < 2:
-                raise ValueError(
-                    "scientific TIFF must contain TEM and Registered FLM series"
-                )
-
-            tem = tif.series[0].asarray()
-            flm = tif.series[1].asarray()
-
-        self._remove_layer_if_present(
-            "Scientific TEM"
-        )
-
-        self._remove_layer_if_present(
-            "Scientific Registered FLM"
-        )
-
-        self.viewer.add_image(
-            tem,
-            name="Scientific TEM",
-            colormap="gray",
-        )
-
-        self.viewer.add_image(
-            flm / 255.0,
-            name="Scientific Registered FLM",
-            rgb=True,
-            opacity=0.5,
-            blending="translucent",
-            contrast_limits=(0.0, 1.0),
-        )

@@ -283,7 +283,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         step=1.0,
         value=0.0,
         readout=True,
-        tracking=False
+        tracking=True
     )
 
     tem_rotation = FloatSlider(
@@ -621,6 +621,11 @@ def make_offline_correlation_widget(viewer) -> Container:
             return
 
         combo.value = layer # ComboBox stores actual layer objects.
+        _use_landmark_layer(
+            combo,
+            role,
+            status,
+        )
     
     # wrappers for corresponding modalities
     def _on_import_flm_points(event=None):
@@ -745,8 +750,13 @@ def make_offline_correlation_widget(viewer) -> Container:
             session.flm.image is not None
             and session.tem.image is not None
         ):
-            registered_affine_rc = affine_xy_to_rc(
+            registered_affine_xy = (
                 registration.matrix
+                @ session.flm.orientation_matrix
+            )
+
+            registered_affine_rc = affine_xy_to_rc(
+                registered_affine_xy
             )
 
             controller._remove_layer_if_present(
@@ -843,6 +853,7 @@ def make_offline_correlation_widget(viewer) -> Container:
             role,
             angle_degrees,
         )
+        print(viewer.layers["FLM"].data.shape)
 
         _invalidate_registration()
         _sync_orientation_controls(role)

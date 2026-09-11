@@ -246,6 +246,54 @@ def rotation_matrix( height: int,width: int,angle_degrees: float) -> tuple[np.nd
         (height, width),
     )
     
+    
+# build complete orientation transform for an image without changing a single pixel.
+
+# This function is part of new refator so that we don't have to do the padding
+#Here are the original pixels. when drawn on napari, place them according to this matrix.
+
+def orientation_matrix_from_settings(
+    height: int,
+    width: int,
+    angle_degrees: float = 0.0,
+    *,
+    horizontal_flipped: bool = False,
+    vertical_flipped: bool = False,
+) -> np.ndarray:
+
+    # error handling
+    if height <= 0 or width <= 0:
+        raise ValueError(
+            "image dimensions must be positive"
+        )
+
+    if not np.isfinite(angle_degrees):
+        raise ValueError(
+            "angle must be finite"
+        )
+    
+    rotation, _ = rotation_matrix(
+        height,
+        width,
+        angle_degrees,
+    )
+
+    operation = rotation
+
+    if horizontal_flipped:
+        operation = (
+            horizontal_flip_matrix(width)
+            @ operation
+        )
+
+    if vertical_flipped:
+        operation = (
+            vertical_flip_matrix(height)
+            @ operation
+        )
+
+    return operation
+    
     # rotation is bascially inverse warping , using the transformation matrix
     # takes inputs as the image and the rotation angle in degrees
 def rotate_image(image: np.ndarray, angle_degrees: float,*, order: int = 1) -> tuple[np.ndarray, np.ndarray]:
@@ -326,3 +374,5 @@ def orient_image_from_baseline(
         image = baseline.copy()
 
     return image, operation 
+
+
