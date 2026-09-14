@@ -1410,6 +1410,15 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             )
     )
     
+    load_image_button.clicked.connect(
+        _on_load_image
+    )
+    
+    load_csv_button.clicked.connect(
+        _on_load_csv
+    )
+           
+    
     # registers that function as a listener. Then later click calls it
     # connects the click to function object
     use_flm_landmarks_button.clicked.connect(
@@ -1418,16 +1427,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
 
     use_tem_landmarks_button.clicked.connect(
         _on_use_tem_landmarks
-    )
-        
-    load_image_button.clicked.connect(
-        _on_load_image
-    )
-    
-    load_csv_button.clicked.connect(
-        _on_load_csv
-    )
-             
+    )  
 
         
     calculate_registration_button.clicked.connect(
