@@ -29,35 +29,43 @@ from correlation2d3d.core.transform import Registration2D
              └──────┬──────────┘
                     │
                registration
-                    │
-                 warped FLM
+              
       
 # One place to answer what is the CURRENT STATE OF EVERYTHING ? this becomes home for the changing states.
         
-      
-        
-     Mutable state for one imaging modality.
 
-    original_image:
-        Pixel data exactly as loaded.
+    
+Mutable state for one imaging modality.
 
-    image:
-        Current working orientation of the image.
+original_image:
+    Copy of the source Image layer pixel data when the role is assigned.
 
-    original_points:
-        Landmark coordinates in the original image coordinate system.
+image:
+    Source pixel data used by the correlation workflow.
+    Orientation and rough alignment do not modify this array; they are
+    represented geometrically by the napari Image layer transform.
 
-    points:
-        Landmark coordinates in the current working coordinate system.
+original_points:
+    Landmark coordinates in source-image pixel coordinates.
 
-    orientation_matrix:
-        Maps original image coordinates into the current working coordinates.
-    """
+points:
+    Landmark coordinates in the current napari world coordinate system.
+
+orientation_matrix:
+    Plugin-owned rotation/flip transform in x/y coordinates.
+    The complete current source transform, including native napari
+    translation, rotation, and scale, is read from the assigned Image layer.
+"""
 @dataclass
 class ModalityState:
  
+    # None means we haven't assigned an image to this role yet
+    # assignment copies the pixels into both arrays, orientation only changes
+    # transforms
     original_image: np.ndarray | None = None 
     image: np.ndarray | None = None 
+    # original here means source-image coordinates, not an untouched copy of the CSV
+    # when landmarks are edited we work these out again using the inverse transform
     original_points: Points2D | None = None 
     points: Points2D | None = None
     
@@ -72,18 +80,8 @@ class ModalityState:
             dtype=np.float64,
         )
     )
-    
-    # Fixed original padded image; flips and rotations never replace this baseline.
-    rotation_base_image: np.ndarray | None = None
 
-    rotation_base_orientation_matrix: np.ndarray = field(
-        default_factory=lambda: np.eye(
-            3,
-            dtype=np.float64,
-        )
-    )
-
-    #rebuild from the baseline using this absolute angle, then display-axis flips.
+   # Plugin-owned absolute rotation angle and flip settings.
     rotation_angle: float = 0.0
     horizontal_flipped: bool = False
     vertical_flipped: bool = False
@@ -102,12 +100,10 @@ class CorrelationSession:
     tem: ModalityState = field(
         default_factory=ModalityState
     )
+    # store the fit here once it succeeds, invalidation puts it back to None
+    # the widget and controller also clear the displayed result layers
     registration: Registration2D | None = None
-   
-
-    warped_flm: np.ndarray | None = None #(need to figure the why warped layer is very bright. currect displaying the registered layer directly)
-    
-    
+       
 """ 
 CorrelationSession
 │
@@ -126,8 +122,6 @@ CorrelationSession
 │   └── orientation_matrix
 │
 ├── registration
-│
-└── warped_flm
     
 """
     

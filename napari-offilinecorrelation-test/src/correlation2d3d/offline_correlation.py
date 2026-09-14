@@ -11,7 +11,6 @@ import numpy as np
 
 from magicgui.widgets import (
     Container,
-    FileEdit,
     Label,
     PushButton,
     FloatSlider,
@@ -21,12 +20,12 @@ from magicgui.widgets import (
 from skimage import io
 
 from qtpy.QtWidgets import (
-    QSlider,
-    QDoubleSpinBox,
-    QLineEdit,
     QSizePolicy,
     QFileDialog,
+    QScrollArea,
 )
+
+from qtpy.QtCore import Qt
 
 from correlation2d3d.session import CorrelationSession
 from correlation2d3d.offline_controller import OfflineCorrelationController
@@ -35,28 +34,8 @@ from correlation2d3d.fileio.points_csv import read_points_csv
 
 from correlation2d3d.core.transform import fit_affine, affine_xy_to_rc
 
-from napari.layers import Points
-# can use later isinstance(layer, Points)
+from napari.layers import Points, Image
 
-
-
-'''user clicks button
-      ↓
-Qt emits clicked event
-      ↓
-magicgui receives it
-      ↓
-_on_load_flm()
-      ↓
-_load_image()
-      ↓
-_read_image()
-      ↓        
-session + napari updated
-
-similar execution for other things aswell.
-
-'''
 
 
 def _read_image(path: Path) -> np.ndarray:
@@ -67,7 +46,7 @@ def _read_image(path: Path) -> np.ndarray:
     suffix = path.suffix.lower()
 
     if suffix in {".mrc", ".mrcs", ".st"}:
-        with mrcfile.open( str(path), permissive=True) as mrc: # we wanna open and close and keep the copy, don't effect the original file also we use permissive=True to allow reading of non-standard MRC files without raising an error.
+        with mrcfile.open( str(path), permissive=True) as mrc: # we wanna open and close and keep the copy, don't effect the og file also we use permissive=True to allow reading of non-standard MRC files without raising an error.
             return np.array(mrc.data,copy=True)
 
     return np.asarray(
@@ -75,33 +54,78 @@ def _read_image(path: Path) -> np.ndarray:
     )
     
     # This function creates a magicgui container widget for the offline correlation tool.
-    # This function is basically our widget factory, call this function and it constructs an object for you! that is awesome
-    # gui construction worker 
-    # it It eventually returns a Container which is the actual gui panel containing all the controls
-def make_offline_correlation_widget(viewer) -> Container:
-    '''Creates a magicgui container widget for the offline correlation tool.
-    The widget includes file edit widgets for loading FLM and TEM images, push buttons for loading the images, and labels to display the status of the loaded images ...
-    The function initializes a CorrelationSession object to store the state of the correlation session, including the loaded images, points, and registration information.'''
-    
-    
+    # This function is basically our widget factory, call this function and it constructs an object for you! that is awesome gui construction worker 
+    # it eventually returns a Container (QScrollArea--> this enables scrolling for smalled screenswhich is the actual gui panel containing all the controls
+def make_offline_correlation_widget(viewer) -> QScrollArea:
+    '''Create the offline-correlation dock widget and its session/controller state.'''
+
     # Every offline-correlation widget has a particular CorrelationSession associated with it.
-    # he session is the memory of the current correlation job.
+    # the session is the memory of the current correlation job.
     session = CorrelationSession()
     
+    # all the callbacks below use this same session and controller
+    # defining a callback doesn't run it, connecting it tells the UI when to call it
     controller = OfflineCorrelationController(
     viewer,
     session,
     )
     
-    # only return the layer if its actual points layer
+    # keep the exact source layer and callback for each role
+    # we need both to disconnect the old source when the user picks another one
+    _modality_transform_connections = {
+        "FLM": {
+            "layer": None,
+            "callback": None,
+        },
+        "TEM": {
+            "layer": None,
+            "callback": None,
+        },
+    }
+    
+    
+    # loading just adds normal images to napari
+    # choosing one in the image dropdown is what makes it FLM or TEM
+    load_image_button = PushButton(
+        text="Load Images"
+    )
+    
+    load_csv_button = PushButton(
+        text="Load CSVs"
+    )
+    
+    # only return the layer if its actual images layer
     # will return the name and also the object itself
     # list with multiple tuples
+    def _get_image_layer_choices(widget=None):
+        # show the layer name in the dropdown but keep the actual layer object as its value
+        # magicgui can pass the widget into this helper when it asks for choices
+        return [
+            (layer.name, layer)
+            for layer in viewer.layers
+            if isinstance(layer, Image)
+        ]
+                    
+            
+    # same as above but for points
     def _get_points_layer_choices(widget=None):
         return [
             (layer.name, layer)
             for layer in viewer.layers
             if isinstance(layer, Points)
         ]
+        
+    flm_image_layer_combo = ComboBox(
+        label="FLM Image Layer",
+        choices=_get_image_layer_choices,
+        nullable=True, # user can select nothing and it will be fine.
+    )
+
+    tem_image_layer_combo = ComboBox(
+        label="TEM Image Layer",
+        choices=_get_image_layer_choices,
+        nullable=True,
+    )
         
     # create two dropdowns for each modality 
     # mullable = True , means will accept "None" as valid value, cause initially there won't be any layer
@@ -118,70 +142,20 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
 
-    # need to tell the ComboBox: Something changed. Calculate your choices again.    
-    def _refresh_points_layer_choices(event=None):
-        flm_landmark_layer_combo.reset_choices()
-        tem_landmark_layer_combo.reset_choices()
-
-
-    def _on_points_layer_renamed(event=None):
-        _refresh_points_layer_choices()
-
-    # layer list inserted callback
-    def _on_layer_inserted(event):
-        layer = event.value # give me the actual layer object that was just added
-
-        if isinstance(layer, Points): # was the thing that was just inserted a Points layer?
-            layer.events.name.connect(
-                _on_points_layer_renamed
-            )
-
-        _refresh_points_layer_choices()
-
-
-    for layer in viewer.layers:
-        if isinstance(layer, Points):
-            layer.events.name.connect(
-                _on_points_layer_renamed
-            )
-
-
-    viewer.layers.events.inserted.connect(
-        _on_layer_inserted
-    )
-
-    viewer.layers.events.removed.connect(
-        _refresh_points_layer_choices
-    )
     
-    flm_file = FileEdit(
-        label="FLM Image",
-        mode="r",
-        filter="*.mrc *.mrcs *.st *.tif *.tiff *.png *.jpg *.jpeg",
-    )
-
-    tem_file = FileEdit(
-        label="TEM Image",
-        mode="r",
-        filter="*.mrc *.mrcs *.st *.tif *.tiff *.png *.jpg *.jpeg",
-    )
-
-    load_flm_button = PushButton(
-        text="Load FLM"
-    )
-
-    load_tem_button = PushButton(
-        text="Load TEM"
-    )
 
     flm_status = Label(
-        value="FLM: not loaded"
+        value="FLM: not assigned"
     )
 
     tem_status = Label(
-        value="TEM: not loaded"
+        value="TEM: not assigned"
     )
     
+    # choosing a Points layer in the dropdown isn't enough, these buttons make it
+    # active
+    # the image dropdowns work differently, they assign the image as soon as we
+    # choose it
     use_flm_landmarks_button = PushButton(
         text="Use FLM Landmarks"
     )
@@ -191,23 +165,13 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     
-    import_flm_points_button = PushButton(
-        text="Import FLM CSV"
-    )
-
-    import_tem_points_button = PushButton(
-        text="Import TEM CSV"
-    )
-    
-    import_flm_points_button.enabled = False
-    import_tem_points_button.enabled = False
 
     flm_points_status = Label(
-        value="FLM landmarks: not loaded"
+        value="FLM landmarks: not assigned"
     )
 
     tem_points_status = Label(
-        value="TEM landmarks: not loaded"
+        value="TEM landmarks: not assigned"
     )
     
     
@@ -239,6 +203,8 @@ def make_offline_correlation_widget(viewer) -> Container:
         text="↕ V"
     )
     
+    # keep a flip button looking pressed while that flip is on
+    # _sync_orientation_controls makes the buttons match the saved settings
     for button in (
     flip_flm_horizontal_button,
     flip_flm_vertical_button,
@@ -251,6 +217,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     reset_flm_orientation_button = PushButton(text="Reset Orientation", enabled=False)
     reset_tem_orientation_button = PushButton(text="Reset Orientation", enabled=False)
 
+    # keep the flip buttons small and put H/V next to each other
     flip_flm_horizontal_button.max_width = 70
     flip_flm_vertical_button.max_width = 70
 
@@ -276,6 +243,11 @@ def make_offline_correlation_widget(viewer) -> Container:
 
     
     
+    # the sliders give us the angle we want and update as we drag because
+    # tracking=True
+    # for each value we rebuild a transform, not a padded image
+    # the core decides which sign means clockwise, the slider just gives us the
+    # number
     flm_rotation = FloatSlider(
         label="Rotate °",
         min=-180.0,
@@ -283,7 +255,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         step=1.0,
         value=0.0,
         readout=True,
-        tracking=False
+        tracking=True
     )
 
     tem_rotation = FloatSlider(
@@ -293,29 +265,17 @@ def make_offline_correlation_widget(viewer) -> Container:
         step=1.0,
         value=0.0,
         readout=True,
-        tracking=False
+        tracking=True
     )
     
-    flm_qslider = flm_rotation.native.findChild(
-    QSlider
-    )
 
-    flm_rotation_readout = flm_rotation.native.findChild(
-        QDoubleSpinBox
-    )
-
-    tem_qslider = tem_rotation.native.findChild(
-        QSlider
-    )
-
-    tem_rotation_readout = tem_rotation.native.findChild(
-        QDoubleSpinBox
-    )
-
+    # keep rotation disabled until we have an image assigned for that role
     flm_rotation.enabled = False
     tem_rotation.enabled = False
     
     
+    # pair and unpair use the selected points in our active landmark layers
+    # not just whichever Points layer is highlighted in napari
     pair_selected_button = PushButton(
         text="Pair Selected Points"
     )
@@ -323,8 +283,21 @@ def make_offline_correlation_widget(viewer) -> Container:
     pairing_status = Label(
         value="Pairs: none"
     )
+    unpair_selected_button = PushButton(
+        text="Unpair Selected"
+    )
     
+    pairing_buttons_row = Container(
+        widgets=[
+            pair_selected_button,
+            unpair_selected_button,
+        ],
+        layout="horizontal",
+    )
     
+    # scientific export saves two aligned arrays, visual export saves one picture of
+    # the overlay
+    # opening a scientific TIFF just displays it, it doesn't load a whole project
     save_scientific_tiff_button = PushButton(
         text="Save Scientific TIFF"
     )
@@ -337,24 +310,7 @@ def make_offline_correlation_widget(viewer) -> Container:
     )
     
     
-    for file_widget in (
-            flm_file,
-            tem_file,
-        ):
-            line_edit = file_widget.native.findChild(QLineEdit)
     
-            if line_edit is not None:
-                line_edit.setMinimumWidth(100)
-    
-                line_edit.setSizePolicy(
-                    QSizePolicy.Ignored,
-                    QSizePolicy.Fixed,
-                )
-    
-    
-    
-                        
-
     save_visual_overlay_button = PushButton(
         text="Save Visual Overlay"
     )
@@ -363,6 +319,7 @@ def make_offline_correlation_widget(viewer) -> Container:
         value="Visual export: not saved"
     )
     
+    # don't let a long file path in the status label make the whole dock really wide
     for status in (
             flm_status,
             tem_status,
@@ -376,6 +333,393 @@ def make_offline_correlation_widget(viewer) -> Container:
                 QSizePolicy.Ignored,
                 QSizePolicy.Preferred,
             )
+    
+    
+    # enable the registration buttion is both flm and tem data exist in the session this gets populated in the _load_points
+    def _update_registration_button() -> None:
+            # this only checks that both point sets exist
+            # Calculate does the checks for point counts, matching pairs and
+            # non-collinear points
+            calculate_registration_button.enabled = (
+            session.flm.points is not None
+            and session.tem.points is not None
+        )
+    
+    # Invalidate the registion uses the method from controlled.
+    def _invalidate_registration() -> None:
+        controller.invalidate_registration()
+
+        registration_status.value = (
+            "Registration: not calculated"
+        )
+    
+    
+    # Display the stored settings without triggering another image update
+    # # Display the modality's stored plugin orientation settings without
+    # triggering another orientation update.
+    # display the stored setting  when called from rebuild_modality_orientation()
+    # make the controls display what the session currently stores.
+    def _sync_orientation_controls(role: str) -> None:
+        
+        modality = controller._get_modality(role)
+        if role == "FLM":
+            slider = flm_rotation
+            horizontal_button = flip_flm_horizontal_button
+            vertical_button = flip_flm_vertical_button
+        else:
+            slider = tem_rotation
+            horizontal_button = flip_tem_horizontal_button
+            vertical_button = flip_tem_vertical_button
+
+        # we're making the slider match the session, not asking for another rotation
+        # block changed for this assignment so it doesn't call the rotation callback
+        # again
+        with slider.changed.blocked():
+            slider.value = modality.rotation_angle
+        # make the buttons match the saved flip flags
+        # setChecked doesn't fire the clicked signal we use for flipping
+        horizontal_button.native.setChecked(modality.horizontal_flipped)
+        vertical_button.native.setChecked(modality.vertical_flipped)
+        
+        
+        
+    def _on_load_image(
+        event=None,
+    ) -> None:
+
+        # let the user choose several files at once
+        # the second returned value is the file filter, we don't need it here
+        file_names, _ = QFileDialog.getOpenFileNames(
+            None,
+            "Load Images",
+            "",
+            (
+                "Images (*.mrc *.mrcs *.st "
+                "*.tif *.tiff *.png *.jpg *.jpeg);;"
+                "All files (*)"
+            ),
+        )
+
+        # cancel means do nothing, keep the viewer and assignments as they are
+        if not file_names:
+            return
+
+        for file_name in file_names:
+
+            path = Path(
+                file_name
+            )
+
+            try:
+                image = _read_image(
+                    path
+                )
+
+            # if one file fails, report it and keep loading the other selected files
+            except (ValueError, OSError) as error:
+                print(
+                    f"Image load failed for {path.name}: "
+                    f"{error}"
+                )
+                continue
+
+            # add a normal Image layer, the inserted event updates the dropdowns
+            # the user still needs to choose which one is FLM and which one is TEM
+            viewer.add_image(
+                image,
+                name=path.name,
+            )
+    
+    
+    # Take whatever Image layer the user selected in one of the dropdowns and assign it to FLM or TEM.
+    # reads combo.value, calls controller.use_image_layer(), 
+    # enables the correct controls, resets orientation UI, invalidates any old registration.
+    def _use_image_layer(
+        combo: ComboBox,
+        role: str,
+        status: Label,
+    ) -> None:
+
+        layer = combo.value
+
+        # nothing chosen, so show a prompt and leave any existing assignment alone
+        if layer is None:
+            status.value = (
+                f"{role}: choose an Image layer"
+            )
+            return
+        
+        # this try excepts was part of experimentation i did. wanted to tranform registered flm back to og flm
+        # this handles that cleanly 
+        try:
+            registered_flm_layer = viewer.layers[
+                "Registered FLM"
+            ]
+        except KeyError:
+            registered_flm_layer = None
+
+        # don't adopt the current result as a source that cleanup could remove
+        # this check uses its current name, it isn't a permanent output tag
+        if (
+            registered_flm_layer is not None
+            and layer is registered_flm_layer
+        ):
+            status.value = (
+                f"{role}: Registered FLM is a generated output. "
+                "Rename or duplicate it before using it as an input."
+            )
+            return
+
+
+
+        try:
+            controller.use_image_layer(
+                role,
+                layer,
+            )
+        # for example, the same image can't be FLM and TEM
+        # show the error here, this doesn't switch the dropdown back to its old
+        # choice
+        except ValueError as error:
+            status.value = (
+                f"{role}: {error}"
+            )
+            return
+
+        status.value = (
+            f"{role}: "
+            f"{layer.name} "
+            f"{tuple(layer.data.shape)}"
+        )
+
+        # only enable controls once assignment worked
+        # assigning an image also cleared its old landmark link, so reset that status
+        # too
+        if role == "FLM":
+            flip_flm_horizontal_button.enabled = True
+            flip_flm_vertical_button.enabled = True
+            reset_flm_orientation_button.enabled = True
+            flm_rotation.enabled = True
+            flm_points_status.value = (
+                "FLM landmarks: not assigned"
+            )
+
+
+        else:
+            flip_tem_horizontal_button.enabled = True
+            flip_tem_vertical_button.enabled = True
+            reset_tem_orientation_button.enabled = True
+            tem_rotation.enabled = True
+
+            tem_points_status.value = (
+                "TEM landmarks: not assigned"
+            )
+        
+        # native flm or tem transform , landmarks follow, registration invalidated
+        _connect_modality_transform_events(
+            role
+        )
+
+        # show the new zero/false settings without triggering another rotation
+        _sync_orientation_controls(
+            role
+        )
+
+        _invalidate_registration()
+        _update_registration_button()
+    
+    def _connect_modality_transform_events(
+        role: str,
+    ) -> None:
+
+        image_layer = controller.get_modality_image_layer(
+            role
+        )
+
+        connection = (
+            _modality_transform_connections[role]
+        )
+
+        old_layer = connection["layer"]
+        old_callback = connection["callback"]
+
+        # already listening to this layer, so don't connect the same callback twice
+        if (
+            old_layer is image_layer
+            and old_callback is not None
+        ):
+            return
+
+        if (
+            old_layer is not None
+            and old_callback is not None
+        ):
+            # stop listening to the old source, otherwise moving it would still
+            # affect this role
+            old_layer.events.affine.disconnect(
+                old_callback
+            )
+
+        # remember the role now, napari gives us the event later
+        # save this exact callback so we can disconnect it next time
+        callback = (
+            lambda event, role=role:
+            _on_modality_transform_changed(role)
+        )
+
+        # this listens to affine changes for FLM and TEM
+        # it doesn't listen to every separate transform setting or to changes in the
+        # pixel data
+        image_layer.events.affine.connect(
+            callback
+        )
+
+        connection["layer"] = image_layer
+        connection["callback"] = callback
+    
+    #React when user rough-aligns FLM/TEM with napari's Transform tool. 
+    # Internally? Move attached landmarks and invalidate any precise registration because the source geometry changed
+    # Rough alignment changed the coordinate system, so anything derived from the old geometry is stale.
+    def _on_modality_transform_changed(
+        role: str,
+    ) -> None:
+
+        controller.sync_landmarks_to_modality_transform(
+            role
+        )
+
+        _invalidate_registration()
+    
+          
+    #Figure out how to perform a horizontal flip.
+    # All three function below are just wrappers now. real work in controller
+    def _flip_modality_horizontal(role: str) -> None:
+        controller.flip_modality_horizontal(
+            role
+        )
+
+        # the controller moves things, this wrapper clears the old fit and updates
+        # the controls
+        # vertical flip, reset and rotation follow the same order
+        _invalidate_registration()
+        _sync_orientation_controls(role)
+        
+    
+    def _flip_modality_vertical(role: str) -> None:
+        controller.flip_modality_vertical(
+            role
+        )
+
+        _invalidate_registration()
+        _sync_orientation_controls(role)
+        
+    def _reset_modality_orientation(role: str) -> None:
+        controller.reset_modality_orientation(
+            role
+        )
+
+        _invalidate_registration()
+        _sync_orientation_controls(role)
+                    
+     # connect the button to the callback.   
+    def _on_flip_flm_horizontal(event=None):
+        _flip_modality_horizontal("FLM")
+
+
+    def _on_flip_tem_horizontal(event=None):
+        _flip_modality_horizontal("TEM")
+
+    def _on_flip_flm_vertical(event=None):
+        _flip_modality_vertical("FLM")
+
+
+    def _on_flip_tem_vertical(event=None):
+        _flip_modality_vertical("TEM")
+    
+    # this is essntially our rotation callback
+    def _set_modality_rotation(
+        role: str,
+        angle_degrees: float,
+    ) -> None:
+        # send the selected angle to the controller, don't add it to the previous
+        # angle
+        controller.set_modality_rotation(
+            role,
+            angle_degrees,
+        )
+
+        _invalidate_registration()
+        _sync_orientation_controls(role)
+        
+    def _on_flm_rotation_change(event=None):
+        # read the value from the slider instead of relying on what the signal sends
+        _set_modality_rotation(
+            "FLM",
+            float(flm_rotation.value),
+        )
+
+
+    def _on_tem_rotation_change(event=None):
+        # same thing for TEM, use its slider value and role
+        _set_modality_rotation(
+            "TEM",
+            float(tem_rotation.value),
+        )
+    
+   
+    """
+    csv files 
+    read_points_csv
+    Points2D in original source coordinates 
+    generic hidden napari Points candidate
+    user chooses FLM or TEM landmark role 
+    use_points_layer
+    correct source tranform is finally applied
+    """
+    def _on_load_csv(
+        event=None,
+    ) -> None:
+
+        # this allows us to open multiple files at the same time
+        file_names, _ = QFileDialog.getOpenFileNames(
+            None,
+            "Load Landmark CSVs",
+            "",
+            "CSV files (*.csv);;All files (*)",
+        )
+
+        # cancel leaves the existing candidates and assignments alone
+        if not file_names:
+            return
+
+        # each CSV is its own candidate, we don't pick FLM or TEM here
+        for file_name in file_names:
+
+            path = Path(
+                file_name
+            )
+
+            try:
+                points = read_points_csv(
+                    path
+                )
+
+                # keep source coordinates until Use Landmarks picks an image
+                controller.create_points_layer_from_original_points(
+                    points,
+                    name=path.stem,
+                )
+
+            except (ValueError, OSError) as error:
+                # one bad file shouldn't stop the other selected files loading
+                print(
+                    f"CSV load failed for {path.name}: "
+                    f"{error}"
+                )
+                continue
+    
+    
+    
     def _use_landmark_layer(
         combo: ComboBox,
         role: str,
@@ -388,6 +732,25 @@ def make_offline_correlation_widget(viewer) -> Container:
         if layer is None:
             status.value = (
                 f"{role} landmarks: choose a Points layer first"
+            )
+            return
+        
+        # the blue registered points are a result, not a source landmark set
+        # they still appear in the dropdown, so check before assigning them
+        try:
+            registered_landmarks_layer = viewer.layers[
+                "FLM Landmarks Registered to TEM"
+            ]
+        except KeyError:
+            registered_landmarks_layer = None
+
+        if (
+            registered_landmarks_layer is not None
+            and layer is registered_landmarks_layer
+        ):
+            status.value = (
+                f"{role} landmarks: registered landmarks are a generated output. "
+                "Rename or duplicate them before using them as input."
             )
             return
         
@@ -428,230 +791,126 @@ def make_offline_correlation_widget(viewer) -> Container:
             "TEM",
             tem_points_status,
         )
-    
-    # then connect
-    use_flm_landmarks_button.clicked.connect(
-        _on_use_flm_landmarks
-    )
-
-    use_tem_landmarks_button.clicked.connect(
-        _on_use_tem_landmarks
-    )
-    
-    
-    # enable the registration buttion is both flm and tem data exist in the session this gets populated in the _load_points
-    def _update_registration_button() -> None:
-            calculate_registration_button.enabled = (
-            session.flm.points is not None
-            and session.tem.points is not None
-        )
-    
-    # Invalidate the registion uses the method from controlled.
-    def _invalidate_registration() -> None:
-        controller.invalidate_registration()
-
-        registration_status.value = (
-            "Registration: not calculated"
-        )
-    
-    
-    # Display the stored settings without triggering another image update
-    # form _load_image()  makes the slider show 0° and unchecks H/V.
-    # display the stored setting  when called from _rebuild_modality_from_baseline()
-    # make the controls display what the session currently stores.
-    def _sync_orientation_controls(role: str) -> None:
-        
-        modality = controller._get_modality(role)
-        if role == "FLM":
-            slider = flm_rotation
-            horizontal_button = flip_flm_horizontal_button
-            vertical_button = flip_flm_vertical_button
-        else:
-            slider = tem_rotation
-            horizontal_button = flip_tem_horizontal_button
-            vertical_button = flip_tem_vertical_button
-
-        with slider.changed.blocked():
-            slider.value = modality.rotation_angle
-        horizontal_button.native.setChecked(modality.horizontal_flipped)
-        vertical_button.native.setChecked(modality.vertical_flipped)
-    
-
-    
-    
-        """
-        FileEdit
-        validate path
-        _read_image()
-        controller.set_modality_image()
-        invalidate previous registration
-        update GUI 
-        """
-    def _load_image( file_widget: FileEdit, role: str, status: Label) -> None:
-        
-        """Loads an image from a file path specified in the file_widget and updates the corresponding status label.
-        The function checks if the file path is valid and reads the image using the _read_image function. 
-        It then updates the CorrelationSession object with the loaded image and adds it to the napari viewer. 
-        If the file path is invalid or the file does not exist, it updates the status label accordingly. 
-        
-        Input: file_widget : FileEdit -> the control containing the selected path could be either " flm_file" or "tem_file" they both have .value attribute which is basically the path user selected.
-                
-                role: str -> FLM or TEM image helps to modify the CorrelationSession. which session state and image layer to update.
-                status: Label -> it has a .value changes based different conditions. which status label to update.
-                
-        
-        """
-        value = file_widget.value # get the location of the image
-        # did the user actually choose anything? is no path return
-        if value is None or str(value) in {"", "."}: # reason for this is that empty path is not really empty it had ".", ""
-            status.value = f"{role}: choose an image first"
-            return
-
-
-        path = Path(value) # convert the GUI value into path and make it Path object
-
-        # what if file at that location does not exist ?
-        if not path.is_file():
-            status.value = f"{role}: file does not exist"
-            return
-
-        image = _read_image(path) # read the image.
-        
-        controller.set_modality_image(
-            role,
-            image,
-        )
-
-        #previous registration/warp can no longer
-        # be trusted after replacing an image.
-        _invalidate_registration()
-        _update_registration_button()
-
-        status.value = (
-            f"{role}: {path.name} "
-            f"{tuple(image.shape)}"
-        )
-        
-
-        # Orientation becomes available only after
-        # an image has successfully loaded.
-        if role == "FLM":
-            flip_flm_horizontal_button.enabled = True
-            flip_flm_vertical_button.enabled = True
-            reset_flm_orientation_button.enabled = True
             
-            flm_rotation.enabled = True
-            
-            import_flm_points_button.enabled = True
-
-            flm_points_status.value = (
-                "FLM landmarks: not loaded"
-            )
-        else:
-            flip_tem_horizontal_button.enabled = True
-            flip_tem_vertical_button.enabled = True
-            reset_tem_orientation_button.enabled = True
-    
-            
-            tem_rotation.enabled = True
-            import_tem_points_button.enabled = True
-            tem_points_status.value = (
-                "TEM landmarks: not loaded"
-            )
-        _sync_orientation_controls(role)
-        
-    # connect the buttons to the _load_image function with the appropriate parameters
-    # small adapted supplies the flm specific role to the shared loading helper.
-    def _on_load_flm(event=None):
-        _load_image(
-            flm_file,
-            "FLM",
-            flm_status,
-        )
-    
-    def _on_load_tem(event=None):
-        _load_image(
-            tem_file,
-            "TEM",
-            tem_status,
-        )
-    # When the user clicks load_flm_button, load_tem_button button, call the respective function.
-    load_flm_button.clicked.connect(
-        _on_load_flm
-    )
-
-    load_tem_button.clicked.connect(
-        _on_load_tem
-    )
-    
-    def _import_points_csv(
-        role: str,
-        status: Label,
-        combo: ComboBox,
+    def _on_points_mode_changed(
+        layer,
+        event=None,
     ) -> None:
 
-        # file name becomes a path
-        file_name, _ = QFileDialog.getOpenFileName(
-            None, # will pop up as standalone window
-            f"Import {role} landmark CSV",
-            "", # open in current working directory 
-            "CSV files (*.csv);;All files (*)", # just shows csv but provides dropdown option to see other files
-        )
-
-        if not file_name:
+        # we only need this when the user switches to adding points
+        if layer.mode != "add":
             return
 
-        path = Path(file_name) # convert ot Path object
+        if "pair_id" not in layer.features:
+            return
+
+        # new points should start unpaired, not copy the last selected point's pair ID
+        # this sets the default for new points, it doesn't change existing labels
+        layer.feature_defaults[
+            "pair_id"
+        ] = ""
+            
+            
+    def _on_points_data_changed(
+        layer,
+        event=None,
+    ) -> None:
+
+        # all Points layers have this listener, but only our active landmarks matter here
+        # ignore changes to unrelated points or generated result points
+        active_roles = [
+            role
+            for role in ("FLM", "TEM")
+            if layer is controller._landmark_layers[role]
+        ]
+
+        if not active_roles:
+            return
+
+        # read the latest point positions and work out their source-image coordinates
+        # this also runs when our own sync code sets layer.data, not just when the
+        # user edits points
+        for role in active_roles:
+            controller.use_points_layer(
+                role,
+                layer,
+            )
+
+        # if a point was deleted, its partner might still have the pair label
+        # clear that leftover label so it doesn't look like a complete pair
+        controller.clear_orphaned_pairs()
+
+        # the input points changed, so the old fit needs to go
+        _invalidate_registration()
+        _update_registration_button()
+    
+    
+    
+    # this is just a wrapper
+    """
+    BUTTON
+    _on_pair_landmarks() 
+        asks
+    controller.pair_selected_landmarks()
+        returns 9
+    _on_pair_landmarks()
+    "Pairs: 9 paired landmarks"
+    """
+    
+    def _on_pair_selected_landmarks(event=None):
 
         try:
-            points = read_points_csv(
-                path
+            pair_id = (
+                controller.pair_selected_landmarks()
             )
 
-            layer = controller.create_points_layer_from_original_points(
-                role,
-                points,
-                name=f"{role} - {path.stem}", # e.g FLM - Item2_X7Y6_FLM_RegSpread9
-            )
-
-        except (ValueError, OSError) as error:
-            status.value = (
-                f"{role} landmarks: import failed: {error}"
+        except ValueError as error:
+            # show why pairing failed, don't make it look like we created a new pair
+            pairing_status.value = (
+                f"Pairs: {error}"
             )
             return
 
-        combo.value = layer # ComboBox stores actual layer objects.
+        pairing_status.value = (
+            f"Created pair {pair_id}"
+        )
+
+        # pair IDs decide which points match, so changing them means the old fit is no longer valid
+        # even if none of the points actually moved
+        _invalidate_registration()
     
-    # wrappers for corresponding modalities
-    def _on_import_flm_points(event=None):
-        _import_points_csv(
-            "FLM",
-            flm_points_status,
-            flm_landmark_layer_combo,
+    def _on_unpair_selected_landmarks(
+        event=None,
+    ):
+
+        # the controller clears the pair ID from both ends, it doesn't delete the  points
+        # if the selection is wrong, show the error and return without clearing the fit
+        try:
+            pair_id = (
+                controller.unpair_selected_landmarks()
+            )
+
+        except ValueError as error:
+            pairing_status.value = (
+                f"Pairs: {error}"
+            )
+            return
+
+        pairing_status.value = (
+            f"Removed pair {pair_id}"
         )
 
-
-    def _on_import_tem_points(event=None):
-        _import_points_csv(
-            "TEM",
-            tem_points_status,
-            tem_landmark_layer_combo,
-        )
-        
-    import_flm_points_button.clicked.connect(
-        _on_import_flm_points
-    )
-
-    import_tem_points_button.clicked.connect(
-        _on_import_tem_points
-    )
+        # the point matching changed, so Calculate needs to run again
+        _invalidate_registration()
 
     
     
     # the actual call back function when registration clicked on
     # this creates the tranformed layer basically.
     def _on_calculate_registration(event=None):
-        
+        # clear the old result before trying again
+        # if the new fit fails, don't leave the old Registered FLM looking like a new success
+        _invalidate_registration()
         if (
             session.flm.points is None
             or session.tem.points is None
@@ -661,6 +920,8 @@ def make_offline_correlation_widget(viewer) -> Container:
             )
             return
 
+        # get the latest active points and match their IDs, or use row order if neither side has IDs
+        # then fit_affine checks if the points have enough geometry for a fit
         try:
             (
                 registration_flm_points,
@@ -678,37 +939,12 @@ def make_offline_correlation_widget(viewer) -> Container:
             )
             return
 
+        # only save the registration after the fit worked, the error paths above
+        # leave it cleared
         session.registration = registration
 
-        """ # Analyze rotation and affine skew
-        A = registration.matrix[:2, :2]
-
-        # direction of tranformed x 
-        horizontal_angle = np.degrees(
-            np.arctan2(-A[1, 0], A[0, 0])
-        )
-
-        vertical_angle = np.degrees(
-            np.arctan2(A[0, 1], A[1, 1])
-        )
-
-        angle_difference = (
-            vertical_angle - horizontal_angle
-        )
-
-        
-
-        print(
-            f"Horizontal direction: {horizontal_angle:.3f}°"
-        )
-        print(
-            f"Vertical direction: {vertical_angle:.3f}°"
-        )
-        print(
-            f"Axis-angle difference: {angle_difference:.3f}°"
-        )"""
-       
-
+        # show where the fitted FLM points land using a separate blue result layer
+        # leave the source landmarks where they were
         predicted = registration.apply(
             registration_flm_points
         )
@@ -745,14 +981,31 @@ def make_offline_correlation_widget(viewer) -> Container:
             session.flm.image is not None
             and session.tem.image is not None
         ):
-            registered_affine_rc = affine_xy_to_rc(
+            flm_transform_xy = (
+                controller.get_modality_transform_xy(
+                    "FLM"
+                )
+            )
+
+            # read from the right, FLM source pixels -> current FLM world positions
+            # -> TEM world positions
+            # the fit alone doesn't start from the source pixels, so we need both transforms
+            registered_affine_xy = (
                 registration.matrix
+                @ flm_transform_xy
+            )
+
+            registered_affine_rc = affine_xy_to_rc(
+                registered_affine_xy
             )
 
             controller._remove_layer_if_present(
                 "Registered FLM"
             )
 
+            # reuse the source pixels and give this new layer the combined transform
+            # we aren't making a warped export array here
+            # the user can adjust Registered FLM later and export reads that updated placement
             viewer.add_image(
                 session.flm.image,
                 name="Registered FLM",
@@ -760,211 +1013,7 @@ def make_offline_correlation_widget(viewer) -> Container:
                 opacity=0.5,
                 blending="translucent",
             )
-            
-
         
-    calculate_registration_button.clicked.connect(
-        _on_calculate_registration
-    )
-    
-          
-    #Figure out how to perform a horizontal flip.
-    # All three function below are just wrappers now. real work in controller
-    def _flip_modality_horizontal(role: str) -> None:
-        controller.flip_modality_horizontal(
-            role
-        )
-
-        _invalidate_registration()
-        _sync_orientation_controls(role)
-        
-    
-    def _flip_modality_vertical(role: str) -> None:
-        controller.flip_modality_vertical(
-            role
-        )
-
-        _invalidate_registration()
-        _sync_orientation_controls(role)
-        
-    def _reset_modality_orientation(role: str) -> None:
-        controller.reset_modality_orientation(
-            role
-        )
-
-        _invalidate_registration()
-        _sync_orientation_controls(role)
-        
-        
-    reset_flm_orientation_button.clicked.connect(
-        lambda event=None: _reset_modality_orientation("FLM")
-    )
-    reset_tem_orientation_button.clicked.connect(
-        lambda event=None: _reset_modality_orientation("TEM")
-    )
-                    
-     # connect the button to the callback.   
-    def _on_flip_flm_horizontal(event=None):
-        _flip_modality_horizontal("FLM")
-
-
-    def _on_flip_tem_horizontal(event=None):
-        _flip_modality_horizontal("TEM")
-
-    def _on_flip_flm_vertical(event=None):
-        _flip_modality_vertical("FLM")
-
-
-    def _on_flip_tem_vertical(event=None):
-        _flip_modality_vertical("TEM")
-
-    flip_flm_horizontal_button.clicked.connect(
-        _on_flip_flm_horizontal
-    )
-
-    flip_flm_vertical_button.clicked.connect(
-        _on_flip_flm_vertical
-    )
-
-    flip_tem_horizontal_button.clicked.connect(
-        _on_flip_tem_horizontal
-    )
-
-    flip_tem_vertical_button.clicked.connect(
-        _on_flip_tem_vertical
-    )
-    
-    # this is essntially our rotation callback
-    def _set_modality_rotation(
-        role: str,
-        angle_degrees: float,
-    ) -> None:
-        controller.set_modality_rotation(
-            role,
-            angle_degrees,
-        )
-
-        _invalidate_registration()
-        _sync_orientation_controls(role)
-        
-    def _on_flm_rotation_change(event=None):
-        _set_modality_rotation(
-            "FLM",
-            float(flm_rotation.value),
-        )
-
-
-    def _on_tem_rotation_change(event=None):
-        _set_modality_rotation(
-            "TEM",
-            float(tem_rotation.value),
-        )
-        
-    flm_rotation.changed.connect(
-        _on_flm_rotation_change
-    )
-
-    tem_rotation.changed.connect(
-        _on_tem_rotation_change
-    )
-    
-    
-    def _update_rotation_readout(slider_widget,qslider,readout,position: int,) -> None:
-
-        native_min = qslider.minimum()
-        native_max = qslider.maximum()
-
-        if native_max == native_min: # avoid diving by zero
-            return
-
-        # what percentage of the way is slider from min to max  0.625 for 45 degree
-        fraction = (
-            (position - native_min)
-            / (native_max - native_min)
-        )
-
-        # and convert that to degrees
-        # if the rotation was 45 degree
-        #value = -180 + 0.625 * (180 - (-180)) = 45 
-       
-        value = (
-            float(slider_widget.min)
-            + fraction
-            * (
-                float(slider_widget.max)
-                - float(slider_widget.min)
-            )
-        )
-
-        # Change only what is displayed.
-        # Do not tell magicgui that the value changed yet.
-        signals_were_blocked = readout.blockSignals(
-            True
-        )
-
-        readout.setValue(
-            value
-        )
-
-        # allow the normal read out single again
-        readout.blockSignals(
-            signals_were_blocked
-        )
-    
-    flm_qslider.sliderMoved.connect(
-        lambda position: _update_rotation_readout(
-            flm_rotation,
-            flm_qslider,
-            flm_rotation_readout,
-            position,
-        )
-    )
-
-    tem_qslider.sliderMoved.connect(
-        lambda position: _update_rotation_readout(
-            tem_rotation,
-            tem_qslider,
-            tem_rotation_readout,
-            position,
-        )
-    )
-    
-    
-    # this is just a wrapper
-    """
-    BUTTON
-    _on_pair_landmarks() 
-        asks
-    controller.pair_selected_landmarks()
-        returns 9
-    _on_pair_landmarks()
-    "Pairs: 9 paired landmarks"
-    """
-    
-    def _on_pair_selected_landmarks(event=None):
-
-        try:
-            pair_id = (
-                controller.pair_selected_landmarks()
-            )
-
-        except ValueError as error:
-            pairing_status.value = (
-                f"Pairs: {error}"
-            )
-            return
-
-        pairing_status.value = (
-            f"Created pair {pair_id}"
-        )
-
-        _invalidate_registration()
-        
-    
-    pair_selected_button.clicked.connect(
-        _on_pair_selected_landmarks
-    )
-    
     
     
     def _on_save_scientific_tiff(event=None):
@@ -976,15 +1025,19 @@ def make_offline_correlation_widget(viewer) -> Container:
             "TIFF files (*.tif *.tiff)",
         )
 
+        # cancel without exporting anything or changing the status
         if not path:
             return
 
+        # add the TIFF extension if the filename doesn't already have it
         if not path.lower().endswith(
             (".tif", ".tiff")
         ):
             path += ".tif"
 
         try:
+            # let the controller handle the grid, sampling and TIFF format
+            # this wrapper just asks where to save and reports what happened
             controller.save_scientific_tiff(
                 path
             )
@@ -998,14 +1051,30 @@ def make_offline_correlation_widget(viewer) -> Container:
         export_status.value = (
             f"Saved: {path}"
         )
+    
+    # This GUI callback's only job is to ask the user which TIFF they want to open and pass that path to the controller.
+    def _on_open_scientific_tiff(
+        event=None,
+    ):
+        path, _ = QFileDialog.getOpenFileName(
+            None,
+            "Open Scientific TIFF",
+            "",
+            "TIFF files (*.tif *.tiff)",
+        )
+        if not path:
+            return
+        try:
+            controller.open_scientific_tiff(path)
+        except (ValueError, OSError) as error:
+            export_status.value = (f"Open failed: {error}")
+            return
 
-
-    save_scientific_tiff_button.clicked.connect(
-        _on_save_scientific_tiff
-    )
+        export_status.value = (f"Opened: {path}")
     
     def _on_save_visual_overlay(event=None):
 
+        # keep the chosen format in case the filename doesn't have a known extension
         path, selected_filter = (
             QFileDialog.getSaveFileName(
                 None,
@@ -1019,11 +1088,14 @@ def make_offline_correlation_widget(viewer) -> Container:
             )
         )
 
+        # cancel before we change any layer visibility for the capture
         if not path:
             return
 
         lower_path = path.lower()
 
+        # if the filename already has a known extension, use that
+        # otherwise go with the format selected in the dialog
         if not lower_path.endswith(
             (
                 ".tif",
@@ -1047,6 +1119,8 @@ def make_offline_correlation_widget(viewer) -> Container:
                 path += ".tif"
 
         try:
+            # let the controller capture and save, it puts visibility back even if capture fails
+            # only show success after the save call finishes
             controller.save_visual_overlay(
                 path
             )
@@ -1060,170 +1134,675 @@ def make_offline_correlation_widget(viewer) -> Container:
         visual_export_status.value = (
             f"Saved: {path}"
         )
+    
+    # want to inspect the layer that napri says was removed
+    def _refresh_image_layer_choices(
+        event=None,
+    ) -> None:
+
+        # a removal event gives us the removed layer in value
+        # rename and insertion refreshes call this without an event, so there might
+        # be no removed layer
+        removed_layer = getattr(
+            event,
+            "value",
+            None,
+        )
+
+        # keep track of whether we cleared a role
+        # refreshing the dropdown and losing an assigned image aren't the same thing
+        active_image_removed = False
+
+        if (
+            removed_layer
+            is controller._image_layers["FLM"]
+        ):
+            # if this was our assigned image, disconnect its listener before clearing the role
+            # compare the actual objects since names can change or look similar
+            connection = (
+                _modality_transform_connections["FLM"]
+            )
+
+            if (
+                connection["layer"] is removed_layer
+                and connection["callback"] is not None
+            ):
+                removed_layer.events.affine.disconnect(
+                    connection["callback"]
+                )
+                connection["layer"] = None
+                connection["callback"] = None
+
+            controller.clear_image_layer(
+                "FLM"
+            )
+
+            flm_status.value = (
+                "FLM: not assigned"
+            )
+
+            flm_points_status.value = (
+                "FLM landmarks: not assigned"
+            )
+
+            # no image now, so disable orientation and CSV import for this role
+            flip_flm_horizontal_button.enabled = False
+            flip_flm_vertical_button.enabled = False
+            reset_flm_orientation_button.enabled = False
+            flm_rotation.enabled = False
+
+            active_image_removed = True
+
+
+        if (
+            removed_layer
+            is controller._image_layers["TEM"]
+        ):
+            connection = (
+                _modality_transform_connections["TEM"]
+            )
+
+            if (
+                connection["layer"] is removed_layer
+                and connection["callback"] is not None
+            ):
+                removed_layer.events.affine.disconnect(
+                    connection["callback"]
+                )
+                connection["layer"] = None
+                connection["callback"] = None
+
+            controller.clear_image_layer(
+                "TEM"
+            )
+
+            # clear TEM's labels and controls too, leave the FLM assignment alone
+            tem_status.value = (
+                "TEM: not assigned"
+            )
+
+            tem_points_status.value = (
+                "TEM landmarks: not assigned"
+            )
+
+            flip_tem_horizontal_button.enabled = False
+            flip_tem_vertical_button.enabled = False
+            reset_tem_orientation_button.enabled = False
+            tem_rotation.enabled = False
+
+
+            active_image_removed = True
+
+        # get the dropdown choices again from the Image layers currently in napari
+        flm_image_layer_combo.reset_choices()
+        tem_image_layer_combo.reset_choices()
+
+        # clear any result that used the old source, then check if Calculate should
+        # be enabled
+        if active_image_removed:
+            _invalidate_registration()
+            _update_registration_button()
+    
+
+    # need to tell the ComboBox: Something changed. Calculate your choices again.   
+    """napari says:
+    "this layer was removed"
+    was it our active FLM/TEM landmark layer? if yes  
+    clear controller reference
+    clear session coordinates
+    invalidate registration
+    disable Calculate if appropriate
+    """
+    def _refresh_points_layer_choices(event=None):
+
+        #  dynamically retrieve the value of an object's (event) attribute using its string name (value)
+        removed_layer = getattr(
+            event,
+            "value",
+            None,
+        )
+
+        active_landmark_removed = False
+
+        if (
+            removed_layer
+            is controller._landmark_layers["FLM"]
+        ):
+            # clear both versions of the points so we don't keep using a deleted landmark layer
+            controller._landmark_layers["FLM"] = None
+
+            session.flm.points = None
+            session.flm.original_points = None
+
+            flm_points_status.value = (
+                "FLM landmarks: not assigned"
+            )
+
+            active_landmark_removed = True
+
+        if (
+            removed_layer
+            is controller._landmark_layers["TEM"]
+        ):
+            controller._landmark_layers["TEM"] = None
+
+            session.tem.points = None
+            session.tem.original_points = None
+
+            tem_points_status.value = (
+                "TEM landmarks: not assigned"
+            )
+
+            active_landmark_removed = True
+
+        # update the dropdown names and objects even if the removed layer wasn't one we were using
+        flm_landmark_layer_combo.reset_choices()
+        tem_landmark_layer_combo.reset_choices()
+
+        if active_landmark_removed:
+            _invalidate_registration()
+            _update_registration_button()
+
+
+    def _on_points_layer_renamed(event=None):
+        # just update the names in the menu, we still remember the same layer object
+        _refresh_points_layer_choices()
+
+    # layer list inserted callback
+    def _on_layer_inserted(event):
+        layer = event.value # give me the actual layer object that was just added
+
+        if isinstance(layer, Points): # was the thing that was just inserted a Points layer?
+            layer.events.name.connect(
+                _on_points_layer_renamed
+            )
+            # layer=layer makes each lambda remember the right layer for later
+            # without it, the loop below could end up using the last layer for every callback
+            layer.events.mode.connect(
+                lambda event, layer=layer:
+                    _on_points_mode_changed(
+                        layer,
+                        event,
+                    )
+            )
+            # listen for points moving, being added or being deleted
+            # if these are active landmarks we need to update the session and clear the old fit
+            layer.events.data.connect(
+                lambda event, layer=layer:
+                    _on_points_data_changed(
+                        layer,
+                        event,
+                    )
+            )
+        # keep track of name changes for all image choices
+        # _connect_modality_transform_events only adds the affine listener once we
+        # assign a role. this basically setsup the listener for name change
+        if isinstance(layer, Image):
+            layer.events.name.connect(
+                lambda event:
+                    _refresh_image_layer_choices()
+            )
+            
+        _refresh_points_layer_choices()
+        _refresh_image_layer_choices()
+
+
+    # there might already be layers when we open the plugin, so connect those too
+    # the inserted event only tells us about layers added after this
+    for layer in viewer.layers:
+        if isinstance(layer, Points):
+            layer.events.name.connect(
+                _on_points_layer_renamed
+            )
+            layer.events.mode.connect(
+                lambda event, layer=layer:
+                    _on_points_mode_changed(
+                        layer,
+                        event,
+                    )
+            )
+            
+            layer.events.data.connect(
+                lambda event, layer=layer:
+                    _on_points_data_changed(
+                        layer,
+                        event,
+                    )
+            )
+            
+        if isinstance(layer, Image):
+            layer.events.name.connect(
+                lambda event:
+                    _refresh_image_layer_choices()
+            )
+
+    # keep both dropdowns updated when layers get added or removed
+    viewer.layers.events.removed.connect(
+        _refresh_image_layer_choices
+    )
+    viewer.layers.events.inserted.connect(
+        _on_layer_inserted
+    )
+
+    viewer.layers.events.removed.connect(
+        _refresh_points_layer_choices
+    )
+        
+        
+    # these lambdas wait for a selection change, they don't run while we build the
+    # widget
+    # they pass the right role and controls, then the helper reads combo.value
+    flm_image_layer_combo.changed.connect(
+    lambda event=None:
+        _use_image_layer(
+            flm_image_layer_combo,
+            "FLM",
+            flm_status,
+        )
+    )
+
+    tem_image_layer_combo.changed.connect(
+        lambda event=None:
+            _use_image_layer(
+                tem_image_layer_combo,
+                "TEM",
+                tem_status,
+            )
+    )
+    
+    # registers that function as a listener. Then later click calls it
+    # connects the click to function object
+    use_flm_landmarks_button.clicked.connect(
+        _on_use_flm_landmarks
+    )
+
+    use_tem_landmarks_button.clicked.connect(
+        _on_use_tem_landmarks
+    )
+        
+    load_image_button.clicked.connect(
+        _on_load_image
+    )
+    
+    load_csv_button.clicked.connect(
+        _on_load_csv
+    )
+             
+
+        
+    calculate_registration_button.clicked.connect(
+        _on_calculate_registration
+    )
+        
+        
+    # connect needs a function to call later, not _reset_modality_orientation("FLM") running now
+    # the lambda waits for the click, ignores the event and passes in the role
+    reset_flm_orientation_button.clicked.connect(
+        lambda event=None: _reset_modality_orientation("FLM")
+    )
+    reset_tem_orientation_button.clicked.connect(
+        lambda event=None: _reset_modality_orientation("TEM")
+    )
+
+    flip_flm_horizontal_button.clicked.connect(
+        _on_flip_flm_horizontal
+    )
+
+    flip_flm_vertical_button.clicked.connect(
+        _on_flip_flm_vertical
+    )
+
+    flip_tem_horizontal_button.clicked.connect(
+        _on_flip_tem_horizontal
+    )
+
+    flip_tem_vertical_button.clicked.connect(
+        _on_flip_tem_vertical
+    )
+        
+    flm_rotation.changed.connect(
+        _on_flm_rotation_change
+    )
+
+    tem_rotation.changed.connect(
+        _on_tem_rotation_change
+    )
+        
+    
+    pair_selected_button.clicked.connect(
+        _on_pair_selected_landmarks
+    )
+        
+    unpair_selected_button.clicked.connect(
+        _on_unpair_selected_landmarks
+    )
+
+
+    save_scientific_tiff_button.clicked.connect(
+        _on_save_scientific_tiff
+    )
 
 
     save_visual_overlay_button.clicked.connect(
         _on_save_visual_overlay
     )
-    
-    # This GUI callback's only job is to ask the user which TIFF they want to open and pass that path to the controller.
-    def _on_open_scientific_tiff(
-        event=None,
-    ):
-        path, _ = QFileDialog.getOpenFileName(
-            None,
-            "Open Scientific TIFF",
-            "",
-            "TIFF files (*.tif *.tiff)",
-        )
-        if not path:
-            return
-        try:
-            controller.open_scientific_tiff(path)
-        except (ValueError, OSError) as error:
-            export_status.value = (f"Open failed: {error}")
-            return
-
-        export_status.value = (f"Opened: {path}")
 
 
     open_scientific_tiff_button.clicked.connect(
         _on_open_scientific_tiff
     )
+    
+    
                 
-    return Container(
+    # above we created the controls and connected their callbacks
+    # this list just puts them in top-to-bottom order, it doesn't run the callbacks
+    # in that order
+    content = Container(
         widgets=[
             Label(
                 value="Offline Correlation"
             ),
+            # load general image, csv
+            load_image_button,
+            load_csv_button,
+
             # FLM
-            flm_file,
-            load_flm_button,
+            flm_image_layer_combo,
             flm_status,
             flm_flip_row,
             flm_rotation,
             reset_flm_orientation_button,
-            import_flm_points_button,
             flm_landmark_layer_combo,
             use_flm_landmarks_button,
             flm_points_status,
-            
-           
 
             # TEM
-            tem_file,
-            load_tem_button,
+            tem_image_layer_combo,
             tem_status,
             tem_flip_row,
             tem_rotation,
             reset_tem_orientation_button,
-            import_tem_points_button,
             tem_landmark_layer_combo,
             use_tem_landmarks_button,
             tem_points_status,
-            
-            pair_selected_button,
+
+            pairing_buttons_row,
             pairing_status,
 
             # Registration / warp
             calculate_registration_button,
             registration_status,
-            
-          
-            
+
             save_scientific_tiff_button,
             open_scientific_tiff_button,
             export_status,
-            
-            
-            
+
             save_visual_overlay_button,
             visual_export_status,
-
         ]
     )
+
+    # put the magicgui controls inside a Qt scroll area so the long form fits in a small dock
+    scroll_area = QScrollArea()
+
+    #Resize the plugin content to the width of the dock instead of letting it preserve some enormous preferred width.
+    scroll_area.setWidgetResizable(
+        True
+    )
+    #This plugin should fit horizontally. Do not let the user wander left/right through a giant form.
+    scroll_area.setHorizontalScrollBarPolicy(
+        Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+
+    # only show the vertical scrollbar when the dock is too short for the content
+    scroll_area.setVerticalScrollBarPolicy(
+        Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+
+    content.native.setMinimumWidth(
+        0
+    )
+
+    scroll_area.setWidget(
+        content.native
+    )
+
+    # keep the Python magicgui object alive along with its Qt widget
+    # we return the outer scroll area, the actual controls are inside it
+    scroll_area._magicgui_content = content
+
+    return scroll_area
         
 
-    
-"""_read_image()
-    disk → NumPy
+"""
+Offline correlation data flow
+=============================
+
+The offline-correlation separates three different kinds of state:
+
+1. Files on disk
+2. Computational state in CorrelationSession
+3. Interactive visualization state in napari
 
 
-make_offline_correlation_widget()
-    owns CorrelationSession
-    creates controls
+IMAGE LOADING
+-------------
 
+_read_image()
 
-callbacks
-    user action → session → napari
-    
-    make_offline_correlation_widget()
-        │
-        ├── session
-        │
-        ├── flm_file
-        │
-        ├── tem_file
-        │
-        └── callback functions
-                 │
-                 └── remember session
+    file on disk
+        ↓
+    NumPy array
 
-The callbacks remain connected to the buttons, so Python keeps the objects they reference alive. 
-
-
-There are three representations of data in here 
-
-If we load an FLM image.
-
-That image exists in three conceptually different places.
-
-Place 1: disk
+The generic Load Images button only loads image data into napari.
 
 For example:
 
-C:\data\FLM_image.tif
+    image_01.tif
+    image_02.st
+        ↓
+    _read_image()
+        ↓
+    NumPy arrays
+        ↓
+    napari Image layers
 
-Just bytes in a file.
+At this point the images are not yet FLM or TEM.
 
-Place 2: Python/session
 
-After reading:
+ROLE ASSIGNMENT
+---------------
 
-session.flm.image
+The user chooses an existing napari Image layer from:
 
-might contain:
+    FLM Image Layer
+    TEM Image Layer
 
-np.ndarray
+Assigning a layer gives that layer a semantic role in the correlation
+workflow.
 
-Now Python can calculate with it.
+For example:
 
-Place 3: napari
+    napari Image layer A
+        ↓
+    assigned as FLM
 
-Napari has:
+    napari Image layer B
+        ↓
+    assigned as TEM
 
-FLM layer
+The controller stores the actual layer objects:
 
-This is the visualization of the image.
+    controller._image_layers["FLM"]
+    controller._image_layers["TEM"]
 
-So:
+The role therefore does not depend on the napari layer name.
 
-FILE ON DISK
-     │
-     │ _read_image()
-     ▼
-NUMPY ARRAY
-     │
-     ├──────────────► session.flm_image
-     │
-     └──────────────► napari "FLM" layer
+SESSION STATE
+-------------
 
-That distinction is fundamental.
+When an Image layer is assigned to FLM or TEM, its pixel data is copied
+into the corresponding modality state:
 
-The session does not exist primarily to display the image.
+    session.flm.image
+    session.tem.image
 
-Napari does not exist primarily to hold the computational state.
+The session stores computational information needed by the correlation
+workflow, including:
 
-They have different jobs.
+    image data
+    orientation settings
+    original landmark coordinates
+    current landmark coordinates
+    registration result
 
+The session is computational state.
+
+It is not responsible for drawing the image on screen.
+
+
+NAPARI STATE
+------------
+
+napari owns the interactive layers shown to the user.
+
+An assigned source image can have geometry such as:
+
+    translation
+    rotation
+    scale
+    affine transformation
+
+The controller asks the actual napari layer where its pixels currently
+map in world coordinates.
+
+So the complete source transform is obtained from the current Image
+layer rather than assuming that the image is still at its original
+position.
+
+
+LANDMARKS
+---------
+
+Landmark Points layers are also ordinary napari layers.
+
+When a Points layer is assigned as FLM or TEM landmarks, the controller
+stores its relationship to the corresponding source image.
+
+Original landmark coordinates are preserved in source-image pixel
+coordinates.
+
+Their displayed positions are reconstructed using the current source
+image transform:
+
+    original image coordinates
+        ↓
+    current source transform
+        ↓
+    napari world coordinates
+
+This allows landmarks to remain attached to structures when the source
+image is roughly translated, rotated, or scaled.
+
+
+REGISTRATION
+------------
+
+Registration uses corresponding FLM and TEM landmarks in their current
+working coordinates.
+
+    FLM landmarks
+        ↓
+    affine registration
+        ↓
+    TEM landmark coordinates
+
+The resulting registration is used to create:
+
+    Registered FLM
+
+Registered FLM is a separate napari Image layer.
+
+It represents the registration result and can be manually refined
+without modifying the original FLM source layer.
+
+
+SOURCE CHANGES AFTER REGISTRATION
+---------------------------------
+
+FLM and TEM source layers are inputs to registration.
+
+If either source geometry changes after registration:
+
+    source transform changes
+        ↓
+    landmarks follow the source
+        ↓
+    old registration is no longer valid
+        ↓
+    registration is invalidated
+
+Manual refinement should instead be performed on:
+
+    Registered FLM
+
+
+EXPORT
+------
+
+Scientific TIFF export uses the actual current geometry of:
+
+    assigned TEM source
+    Registered FLM
+
+Both are rasterized onto a common output grid.
+
+Visual Overlay export captures their rendered appearance in napari.
+
+
+OVERALL FLOW
+------------
+
+files on disk
+    ↓
+_read_image()
+    ↓
+napari Image layers
+    ↓
+assign FLM / TEM roles
+    ↓
+CorrelationSession + controller track semantic state
+    ↓
+rough source alignment
+    ↓
+assign / edit landmarks
+    ↓
+pair corresponding landmarks
+    ↓
+calculate affine registration
+    ↓
+Registered FLM
+    ↓
+optional manual refinement
+    ↓
+scientific TIFF / visual overlay
+
+
+The important separation is:
+
+    CorrelationSession
+        stores computational correlation state
+
+    OfflineCorrelationController
+        coordinates application behavior
+
+    napari
+        owns interactive layers and their current display geometry
+
+The controller connects these pieces without requiring source layers
+to have fixed names such as "FLM" or "TEM".
+
+
+Use a named callback when  body needs explanation, multiple steps, or debugging breakpoints. 
+A lambda is reasonable for a single obvious argument-binding step.
 """

@@ -13,6 +13,9 @@ class Points2D:
     xy:np.ndarray
 
     def __post_init__(self):
+        # the dataclass runs this when we create Points2D, so all points get the same
+        # checks
+        # whether they came from CSV, napari edits or a transform
         array = np.array(
         self.xy, 
         dtype= np.float64,
@@ -29,6 +32,7 @@ class Points2D:
         object.__setattr__(self, 'xy', array) # bypass frozen dataclass restriction to set the attribute
         
     def __len__(self):
+        # count the points, not the individual x and y values
         return len(self.xy)
     
     # Return a copy of the points in row-column order (y,x)
@@ -47,6 +51,9 @@ class Points2D:
                 f"got shape {array.shape}"
             )
 
+        # making Points2D also runs __post_init__, so it copies these reordered
+        # points
+        # checks for NaN or infinity and makes the array read-only
         return cls(array[:, ::-1])
     
     # mask should be 1-d, Boolean, same length as Points2D e.g [True, False, True, ...]
@@ -56,6 +63,8 @@ class Points2D:
         if mask_array.ndim != 1:
             raise ValueError("subset mask must be one-dimensional")
 
+        # this helper wants True or False for each point, not point indices like [0,
+        # 2, 5]
         if mask_array.dtype != np.bool_:
             raise TypeError("subset mask must contain Boolean values")
 
