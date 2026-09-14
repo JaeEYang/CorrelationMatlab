@@ -11,6 +11,8 @@ class Registration2D:
     forward_residuals: np.ndarray | None = None
     
     def __post_init__(self):
+        # take our own float64 copy so changes to the input array won't change this
+        # matrix
         matrix = np.array(
             self.matrix,
             dtype=np.float64,
@@ -39,17 +41,22 @@ class Registration2D:
                 "last row [0, 0, 1]"
             )
 
+        # frozen stops attribute changes but not edits inside a NumPy array, so lock
+        # the matrix too
+        # this doesn't copy or lock the residuals array
         matrix.setflags(write=False)
         object.__setattr__(self, "matrix", matrix)
 
         
     def apply(self, points: Points2D) -> Points2D:
+        # use the same helper we use for orientation, it's still just a matrix moving points
         return apply_affine_matrix( 
             self.matrix,
             points,
         )
     @property # turns the method into a property so we can access it like an attribute e.g registration.rmse instead of registration.rmse()
     def rmse(self) -> float | None:
+      
         if self.forward_residuals is None:
             return None
 
@@ -141,7 +148,7 @@ def fit_affine(
         raise ValueError(
             "source and destination must contain the same number of points"
         )
-    # require at least 3 points to determine an affine transformation
+
     if len(source) < 3:
         raise ValueError(
             "affine registration requires at least 3 point correspondences"
@@ -152,6 +159,7 @@ def fit_affine(
         np.ones(len(source)),
     ])
     # use least squares to solve for the affine transformation coefficients
+    # solve both destination columns together, every pair counts equally
     coefficients, _, rank, _ = np.linalg.lstsq(
         design,
         destination.xy,
@@ -164,6 +172,8 @@ def fit_affine(
             "to determine an affine transform"
         )
 
+    # the solver gives us (3,2), transpose that into the top two rows of the affine
+    # leave the last row as [0, 0, 1]
     matrix = np.eye(3, dtype=np.float64)
     matrix[:2, :] = coefficients.T
     
@@ -217,6 +227,8 @@ def affine_xy_to_rc( matrix: np.ndarray) -> np.ndarray:
         [0.0, 0.0, 1.0],
     ])
 
+    # swap the input order on the right and the output order on the left
+    # same transform, just written for a different coordinate order
     return (
         swap_xy_rc
         @ matrix

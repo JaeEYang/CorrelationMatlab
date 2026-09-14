@@ -46,6 +46,8 @@ def read_points_csv(path: str | Path,*,order: Order = "xy") -> Points2D:
     
     rows = []
     expected_columns = None
+    # utf-8-sig handles a UTF-8 BOM too, so it doesn't get stuck on the first number
+    # let csv.reader handle the rows and newlines
     with Path(path).open("r", newline="", encoding="utf-8-sig") as file:
         
         reader = csv.reader(file)
@@ -86,6 +88,8 @@ def read_points_csv(path: str | Path,*,order: Order = "xy") -> Points2D:
                 values = values[:2] # remove the ones column, so we can store them as 2D points in Points2D
                 
             rows.append(values)
+    # an empty CSV can still give us an empty Points2D
+    # checking if we have enough landmarks is the fitting step's job
     if not rows:
         array = np.empty((0, 2), dtype=np.float64) # if empty we need the correct shape
     else:
@@ -105,19 +109,21 @@ CSV representation
      |
      v
 write file'''
-
+# will be used later if we wanna saave the selected landmarks to the csv
 def write_points_csv(path: str | Path, points: Points2D, *, order: Order = "xy") -> None:
     if order not in ("xy", "yx"):
         raise ValueError(
             f"order must be 'xy' or 'yx', got {order!r}"
         )
+    # save just the coordinates, no pair IDs, transform or header
+    # yx only swaps the columns in the file, it doesn't change the stored points
     array = points.xy
     if order == "yx":
         array = array[:,::-1] # Flip the order to yx if specified
         
     # now we open the csv and write to it. We will write the points as rows, with each point as a row of two columns.
     with Path(path).open("w", newline ="", encoding="utf-8") as file:
-        writer = csv.writer(file) # write the points to the csv file
-        writer.writerows(array) # write the points to the csv file
+        writer = csv.writer(file) 
+        writer.writerows(array)
         
        

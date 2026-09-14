@@ -6,8 +6,12 @@ from correlation2d3d.offline_correlation import (
 )
 
 def offline_correlation_widget():
+    # napari's manifest points here, opening the plugin calls this
+    # use the viewer that's already open, don't make another window
     viewer = current_viewer()
 
+    # build the panel with its own session and controller
+    # then give the Qt widget back to napari to put in the dock
     return make_offline_correlation_widget(
         viewer
     )
