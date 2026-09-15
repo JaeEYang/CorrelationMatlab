@@ -909,6 +909,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         layer.feature_defaults[
             "pair_id"
         ] = ""
+        
             
             
     def _on_points_data_changed(
@@ -936,6 +937,19 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 layer,
             )
 
+            if role == "FLM":
+                    flm_points_status.value = (
+                        f"FLM landmarks: "
+                        f"{layer.name} "
+                        f"({len(layer.data)} points)"
+                    )
+
+            else:
+                tem_points_status.value = (
+                    f"TEM landmarks: "
+                    f"{layer.name} "
+                    f"({len(layer.data)} points)"
+                )
         # if a point was deleted, its partner might still have the pair label
         # clear that leftover label so it doesn't look like a complete pair
         controller.clear_orphaned_pairs()

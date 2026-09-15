@@ -635,6 +635,24 @@ class OfflineCorrelationController:
             raise ValueError(
                 "landmark Points layer must contain 2D coordinates"
             )
+            
+        # scale landmark markers relative to the image they are assigned to
+        height, width = modality.image.shape[:2]
+
+        landmark_size = float(
+            np.clip(
+                max(height, width) * 0.01,
+                32.0,
+                160.0,
+            )
+        )
+
+        # points already present in the layer
+        if len(layer.data) > 0:
+            layer.size = landmark_size
+
+        # points added after assignment
+        layer.current_size = landmark_size
 
         # CSV candidates carry source coordinates, ordinary napari points may not
         csv_original_xy = layer.metadata.get(
