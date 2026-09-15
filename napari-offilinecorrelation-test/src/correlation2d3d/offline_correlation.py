@@ -84,6 +84,18 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         },
     }
     
+    # this is if the pixel data is changed
+    _modality_data_connections = {
+        "FLM": {
+            "layer": None,
+            "callback": None,
+        },
+        "TEM": {
+            "layer": None,
+            "callback": None,
+        },
+    }
+    
     
     # loading just adds normal images to napari
     # choosing one in the image dropdown is what makes it FLM or TEM
@@ -518,14 +530,13 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         
         # native flm or tem transform , landmarks follow, registration invalidated
         # make sure we follow the latest layer 
-        _connect_modality_transform_events(
-            role
-        )
+        # so assigning and image established both affine listener + data listener
+        _connect_modality_transform_events(role)
+        
+        _connect_modality_data_events(role)
 
         # show the new zero/false settings without triggering another rotation
-        _sync_orientation_controls(
-            role
-        )
+        _sync_orientation_controls(role)
 
         _invalidate_registration()
         _update_registration_button()
@@ -597,6 +608,88 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
 
         _invalidate_registration()
     
+    # this reacts when napari reports that the pixel data of  an assigned source image changed
+    # takes input role
+    #It asks the controller to synchronize the pixels. If the grid changed, it updates the landmark status and orientation controls. In every case, it invalidates the previous registration.
+    def _on_modality_data_changed(
+        role: str,
+    ) -> None:
+
+        grid_changed = controller.sync_modality_image_data(role)
+    
+        # a different array shape was treated as a fresh source assignment
+        # so the old landmark association no longer belongs to this source grid
+        if grid_changed:
+            image_layer = controller.get_modality_image_layer(role)
+        
+            if role == "FLM":
+                flm_status.value = (
+                    f"FLM: {image_layer.name} "
+                    f"{tuple(image_layer.data.shape)}"
+                )
+
+                flm_points_status.value = (
+                    "FLM landmarks: not assigned"
+                )
+
+            else:
+                tem_status.value = (
+                    f"TEM: {image_layer.name} "
+                    f"{tuple(image_layer.data.shape)}"
+                )
+
+                tem_points_status.value = (
+                    "TEM landmarks: not assigned"
+                )
+
+            _sync_orientation_controls(role)
+
+        _invalidate_registration()
+        _update_registration_button()
+                
+    
+    # connects the each FLM/TEM roles to the data event of its currently assigned image layer  
+    # diconnects previous source's data callback, connects the new source, 
+    # and rememebers the exact callback so it can later be disconnected cleanly.
+    # basically same as the _connect_modality_transform_events() but for pixel data. 
+    def _connect_modality_data_events(
+        role: str,
+    ) -> None:
+
+        image_layer = controller.get_modality_image_layer(role)
+
+        connection = _modality_data_connections[role]
+        
+
+        old_layer = connection["layer"]
+        old_callback = connection["callback"]
+
+        if (
+            old_layer is image_layer
+            and old_callback is not None
+        ):
+            return
+
+        if (
+            old_layer is not None
+            and old_callback is not None
+        ):
+            old_layer.events.data.disconnect(
+                old_callback
+            )
+
+        callback = (
+            lambda event, role=role:
+            _on_modality_data_changed(role)
+        )
+
+        image_layer.events.data.connect(
+            callback
+        )
+
+        connection["layer"] = image_layer
+        connection["callback"] = callback            
+
           
     #Figure out how to perform a horizontal flip.
     # All three function below are just wrappers now. real work in controller
@@ -1143,13 +1236,14 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         )
     
     # want to inspect the layer that napri says was removed
+    # Keep the image dropdowns synchronized with the layers that currently exist in napari, 
+    # and clean up our FLM/TEM state if an assigned source image gets deleted.
     def _refresh_image_layer_choices(
         event=None,
     ) -> None:
 
-        # a removal event gives us the removed layer in value
-        # rename and insertion refreshes call this without an event, so there might
-        # be no removed layer
+        # a removal event gives us the removed layer in value  rename and insertion refreshes call this without an event, so there might be no removed layer . 
+        # If event has an attribute called value, give it to me. Otherwise give me None.
         removed_layer = getattr(
             event,
             "value",
@@ -1159,13 +1253,15 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         # keep track of whether we cleared a role
         # refreshing the dropdown and losing an assigned image aren't the same thing
         active_image_removed = False
-
+        
+        # if the exact layer object that napari removed is the same exact object we assigned as FLM ? 
         if (
             removed_layer
             is controller._image_layers["FLM"]
         ):
             # if this was our assigned image, disconnect its listener before clearing the role
             # compare the actual objects since names can change or look similar
+            
             connection = (
                 _modality_transform_connections["FLM"]
             )
@@ -1173,13 +1269,30 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             if (
                 connection["layer"] is removed_layer
                 and connection["callback"] is not None
-            ):
+            ):  
+                # if the layer is being deleted we no longer want the listener
                 removed_layer.events.affine.disconnect(
                     connection["callback"]
                 )
                 connection["layer"] = None
                 connection["callback"] = None
+                
+            data_connection = (
+                _modality_data_connections["FLM"]
+            )
 
+            if (
+                data_connection["layer"] is removed_layer
+                and data_connection["callback"] is not None
+            ):
+                removed_layer.events.data.disconnect(
+                    data_connection["callback"]
+                )
+
+                data_connection["layer"] = None
+                data_connection["callback"] = None    
+            
+            # this unassignes the roles completly. 
             controller.clear_image_layer(
                 "FLM"
             )
@@ -1192,7 +1305,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 "FLM landmarks: not assigned"
             )
 
-            # no image now, so disable orientation and CSV import for this role
+            # no image now, so disable orientation and chnage the flag active layer removed to true
             flip_flm_horizontal_button.enabled = False
             flip_flm_vertical_button.enabled = False
             reset_flm_orientation_button.enabled = False
@@ -1219,6 +1332,21 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 connection["layer"] = None
                 connection["callback"] = None
 
+            data_connection = (
+                _modality_data_connections["TEM"]
+            )
+
+            if (
+                data_connection["layer"] is removed_layer
+                and data_connection["callback"] is not None
+            ):
+                removed_layer.events.data.disconnect(
+                    data_connection["callback"]
+                )
+
+                data_connection["layer"] = None
+                data_connection["callback"] = None
+            
             controller.clear_image_layer(
                 "TEM"
             )
