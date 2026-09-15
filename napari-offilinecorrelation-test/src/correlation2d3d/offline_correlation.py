@@ -503,6 +503,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             f"{role}: "
             f"{layer.name} "
             f"{tuple(layer.data.shape)}"
+            f"{layer.data.dtype}"
         )
 
         # only enable controls once assignment worked
