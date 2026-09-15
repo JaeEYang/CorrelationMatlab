@@ -81,7 +81,7 @@ class OfflineCorrelationController:
 
         return layer
        
-    # assigning an already existing napari Image layer as either FLM or TEM 
+    # assigning an already loaded napari Image layer as either FLM or TEM 
     # store the layer in _image_layers, copies its pixel data into the session
     # resets orientation settings,
     # clears old landmakrs for that role but leaves that napari layer itself intact
@@ -91,6 +91,7 @@ class OfflineCorrelationController:
         layer,
     ) -> None:
 
+        # modality is basically  self.session.flm
         modality = self._get_modality(
             role
         )
@@ -102,6 +103,7 @@ class OfflineCorrelationController:
             else "FLM"
         )
 
+        # if current layer is already associated to a role then error handle 
         if (
             layer
             is self._image_layers[other_role]
@@ -110,8 +112,7 @@ class OfflineCorrelationController:
                 f"{layer.name} is already assigned as {other_role}"
             )
 
-        # remember this as the source layer, keep the actual layer and its napari
-        # transform as they are
+        # add the layer to the dictionaly now and this is associated with the current role
         self._image_layers[role] = layer
 
         # copy the pixels as they are now
@@ -145,6 +146,39 @@ class OfflineCorrelationController:
         modality.points = None
 
         self._landmark_layers[role] = None
+    
+    
+    # keep the session pixel data synchronized if an assigned napari Image layer's
+    # underlying data array is replaced or processed
+    # get the assigned image layer, compare its current pixel array shapr wht session array, copies the new pixels if the shpae is unchanged, and treats a shape chagnes as a fresh assignment
+    def sync_modality_image_data(
+        self,
+        role:str,
+    ) -> bool:
+        
+        modality = self._get_modality(role)
+        
+        image_layer = self.get_modality_image_layer(role)
+        
+        current_data = np.asarray(image_layer.data)
+        
+         # same shape means we assume the pixel coordinate grid is unchanged
+        if (
+            modality.image is not None
+            and current_data.shape == modality.image.shape
+        ):
+            modality.image = np.array(current_data, copy = True) #just copy the pixel data
+            return False # means shape is not not diffrence 
+        
+        # a different shape can change the meaning of pixel coordinates
+        # treat this as a fresh source assignment instead of silently keeping landmarks tied to the old grid
+        self.use_image_layer(
+            role,
+            image_layer,
+        )
+
+        return True
+        
         
     # do the rotation 
     def set_modality_rotation(
@@ -565,6 +599,22 @@ class OfflineCorrelationController:
 
         # get the correct modality (session.flm or .tem)
         modality = self._get_modality(role)
+        
+        # don't let the same Points layer be both FLM and TEM landmarks
+        other_role = (
+            "TEM"
+            if role == "FLM"
+            else "FLM"
+        )
+
+        if (
+            layer
+            is self._landmark_layers[other_role]
+        ):
+            raise ValueError(
+                f"{layer.name} is already assigned as "
+                f"{other_role} landmarks"
+            )
 
         #make sure the image exits
         if modality.image is None:
@@ -585,6 +635,24 @@ class OfflineCorrelationController:
             raise ValueError(
                 "landmark Points layer must contain 2D coordinates"
             )
+            
+        # scale landmark markers relative to the image they are assigned to
+        height, width = modality.image.shape[:2]
+
+        landmark_size = float(
+            np.clip(
+                max(height, width) * 0.01,
+                32.0,
+                160.0,
+            )
+        )
+
+        # points already present in the layer
+        if len(layer.data) > 0:
+            layer.size = landmark_size
+
+        # points added after assignment
+        layer.current_size = landmark_size
 
         # CSV candidates carry source coordinates, ordinary napari points may not
         csv_original_xy = layer.metadata.get(
