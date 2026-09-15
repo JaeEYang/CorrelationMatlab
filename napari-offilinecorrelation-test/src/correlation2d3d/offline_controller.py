@@ -81,7 +81,7 @@ class OfflineCorrelationController:
 
         return layer
        
-    # assigning an already existing napari Image layer as either FLM or TEM 
+    # assigning an already loaded napari Image layer as either FLM or TEM 
     # store the layer in _image_layers, copies its pixel data into the session
     # resets orientation settings,
     # clears old landmakrs for that role but leaves that napari layer itself intact
@@ -91,6 +91,7 @@ class OfflineCorrelationController:
         layer,
     ) -> None:
 
+        # modality is basically  self.session.flm
         modality = self._get_modality(
             role
         )
@@ -102,6 +103,7 @@ class OfflineCorrelationController:
             else "FLM"
         )
 
+        # if current layer is already associated to a role then error handle 
         if (
             layer
             is self._image_layers[other_role]
@@ -110,8 +112,7 @@ class OfflineCorrelationController:
                 f"{layer.name} is already assigned as {other_role}"
             )
 
-        # remember this as the source layer, keep the actual layer and its napari
-        # transform as they are
+        # add the layer to the dictionaly now and this is associated with the current role
         self._image_layers[role] = layer
 
         # copy the pixels as they are now
@@ -565,6 +566,22 @@ class OfflineCorrelationController:
 
         # get the correct modality (session.flm or .tem)
         modality = self._get_modality(role)
+        
+        # don't let the same Points layer be both FLM and TEM landmarks
+        other_role = (
+            "TEM"
+            if role == "FLM"
+            else "FLM"
+        )
+
+        if (
+            layer
+            is self._landmark_layers[other_role]
+        ):
+            raise ValueError(
+                f"{layer.name} is already assigned as "
+                f"{other_role} landmarks"
+            )
 
         #make sure the image exits
         if modality.image is None:

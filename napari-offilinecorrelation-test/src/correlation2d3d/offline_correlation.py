@@ -47,6 +47,7 @@ def _read_image(path: Path) -> np.ndarray:
 
     if suffix in {".mrc", ".mrcs", ".st"}:
         with mrcfile.open( str(path), permissive=True) as mrc: # we wanna open and close and keep the copy, don't effect the og file also we use permissive=True to allow reading of non-standard MRC files without raising an error.
+            mrc.print_header()
             return np.array(mrc.data,copy=True)
 
     return np.asarray(
@@ -456,7 +457,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 "Registered FLM"
             ]
         except KeyError:
-            registered_flm_layer = None
+            registered_flm_layer = None # i mean if it doesn't exist then we good
 
         # don't adopt the current result as a source that cleanup could remove
         # this check uses its current name, it isn't a permanent output tag
@@ -516,6 +517,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             )
         
         # native flm or tem transform , landmarks follow, registration invalidated
+        # make sure we follow the latest layer 
         _connect_modality_transform_events(
             role
         )
@@ -528,14 +530,18 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         _invalidate_registration()
         _update_registration_button()
     
+    # This function makes sure each role listens to affine changes 
+    # on its currently assigned image and stops listening to the previous image.
     def _connect_modality_transform_events(
         role: str,
     ) -> None:
 
+        # get the image currently assigned to this role
         image_layer = controller.get_modality_image_layer(
             role
         )
 
+        # look up the listners previoulsy connected to this role if any
         connection = (
             _modality_transform_connections[role]
         )
@@ -550,6 +556,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         ):
             return
 
+        # if the different image was previously assigned remove the listner
         if (
             old_layer is not None
             and old_callback is not None
@@ -700,7 +707,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             )
 
             try:
-                points = read_points_csv(
+                points = read_points_csv(  # returns Points2D object 
                     path
                 )
 
