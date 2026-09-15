@@ -148,8 +148,8 @@ class OfflineCorrelationController:
         self._landmark_layers[role] = None
     
     
-    # this is to fix bug 2. image pixels internally did not match what was shown on napari. meaning contrast, brightness etc .
-    # this func makes the session's working pixel array match the current assigned napari image layer whenever layer.data changes
+    # keep the session pixel data synchronized if an assigned napari Image layer's
+    # underlying data array is replaced or processed
     # get the assigned image layer, compare its current pixel array shapr wht session array, copies the new pixels if the shpae is unchanged, and treats a shape chagnes as a fresh assignment
     def sync_modality_image_data(
         self,
@@ -167,7 +167,7 @@ class OfflineCorrelationController:
             modality.image is not None
             and current_data.shape == modality.image.shape
         ):
-            modality.image = np.array(current_data,copy=true) #just copy the pixel data
+            modality.image = np.array(current_data, copy = True) #just copy the pixel data
             return False # means shape is not not diffrence 
         
         # a different shape can change the meaning of pixel coordinates
