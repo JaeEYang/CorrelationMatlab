@@ -80,7 +80,22 @@ class OfflineCorrelationController:
             )
 
         return layer
-       
+    
+    #give the rest of the controller one consistent way to obtain the scientific image from either:
+    # normal napari Image or multiscale napari Image
+    def _get_full_resolution_image_data(
+        self,
+        layer,
+    ) -> np.ndarray:
+
+        if layer.multiscale:
+            data = layer.data[0] # level 0 is the largest
+        else:
+            data = layer.data
+
+        return np.asarray(data)
+    
+    
     # assigning an already loaded napari Image layer as either FLM or TEM 
     # store the layer in _image_layers, copies its pixel data into the session
     # resets orientation settings,
@@ -114,16 +129,20 @@ class OfflineCorrelationController:
 
         # add the layer to the dictionaly now and this is associated with the current role
         self._image_layers[role] = layer
+        
+        source_data = self._get_full_resolution_image_data(
+            layer
+        )
 
         # copy the pixels as they are now
         # these aren't live links, changing layer.data later won't update the session copies
         modality.original_image = np.array(
-            layer.data,
+            source_data,
             copy=True,
         )
 
         modality.image = np.array(
-            layer.data,
+            source_data,
             copy=True,
         )
 
@@ -160,7 +179,12 @@ class OfflineCorrelationController:
         
         image_layer = self.get_modality_image_layer(role)
         
-        current_data = np.asarray(image_layer.data)
+        # either multiscale or normal get that correctly
+        current_data = (
+            self._get_full_resolution_image_data(
+                image_layer
+            )
+        )
         
          # same shape means we assume the pixel coordinate grid is unchanged
         if (
@@ -636,33 +660,65 @@ class OfflineCorrelationController:
                 "landmark Points layer must contain 2D coordinates"
             )
             
-        # scale landmark markers relative to the image they are assigned to
-        height, width = modality.image.shape[:2]
-
-        landmark_size = float(
-            np.clip(
-                max(height, width) * 0.01,
-                32.0,
-                160.0,
-            )
-        )
-
-        # points already present in the layer
-        if len(layer.data) > 0:
-            layer.size = landmark_size
-
-        # points added after assignment
-        layer.current_size = landmark_size
-
-        # CSV candidates carry source coordinates, ordinary napari points may not
-        csv_original_xy = layer.metadata.get(
-            "correlation2d3d_original_points_xy"
-        )
-
         # active points are already placed, even if they originally came from CSV
         # this also catches the data event sent by the first placement below
         already_active = (
             self._landmark_layers[role] is layer
+        )
+
+        # only choose an automatic marker size when this layer first becomes active
+        # after that, leave any manual napari size changes alone
+        if not already_active:
+
+            # scale landmark markers relative to the image they are assigned to
+            height, width = modality.image.shape[:2]
+
+            source_landmark_size = float(
+                np.clip(
+                    max(height, width) * 0.01,
+                    32.0,
+                    160.0,
+                )
+            )
+
+            # the raw image shape does not change when napari scales the layer,
+            # so also measure how much one source-image pixel is enlarged in world space
+            display_transform = (
+                self.get_modality_transform_xy(role)
+            )
+
+            x_display_scale = float(
+                np.linalg.norm(
+                    display_transform[:2, 0]
+                )
+            )
+
+            y_display_scale = float(
+                np.linalg.norm(
+                    display_transform[:2, 1]
+                )
+            )
+
+            display_scale = (
+                x_display_scale
+                + y_display_scale
+            ) / 2.0
+
+            landmark_size = (
+                source_landmark_size
+                * display_scale
+            )
+
+            # points already present in the layer
+            if len(layer.data) > 0:
+                layer.size = landmark_size
+
+            # points added after assignment
+            layer.current_size = landmark_size
+
+        # CSV candidates carry source coordinates, ordinary napari points may not
+        csv_original_xy = layer.metadata.get(
+            "correlation2d3d_original_points_xy"
         )
 
         # first assignment or reactivation starts from the saved source coordinates
