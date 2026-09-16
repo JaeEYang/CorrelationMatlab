@@ -34,7 +34,12 @@ from correlation2d3d.fileio.points_csv import read_points_csv
 
 from correlation2d3d.core.transform import fit_affine, affine_xy_to_rc
 
+from correlation2d3d.fileio.imod import (
+    try_read_imod_montage,
+)
+
 from napari.layers import Points, Image
+from time import perf_counter
 
 
 
@@ -44,10 +49,16 @@ def _read_image(path: Path) -> np.ndarray:
     If the file is in MRC, MRCS, or ST format, it uses mrcfile to read the data; otherwise, it uses skimage.io.imread for other formats. '''
     
     suffix = path.suffix.lower()
+    
+    if suffix == ".st":
+        montage = try_read_imod_montage(path)
+
+        if montage is not None:
+            return montage
 
     if suffix in {".mrc", ".mrcs", ".st"}:
         with mrcfile.open( str(path), permissive=True) as mrc: # we wanna open and close and keep the copy, don't effect the og file also we use permissive=True to allow reading of non-standard MRC files without raising an error.
-            mrc.print_header()
+            #mrc.print_header()
             return np.array(mrc.data,copy=True)
 
     return np.asarray(
@@ -429,7 +440,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 )
 
             # if one file fails, report it and keep loading the other selected files
-            except (ValueError, OSError) as error:
+            except (ValueError, OSError, RuntimeError) as error:
                 print(
                     f"Image load failed for {path.name}: "
                     f"{error}"
@@ -438,9 +449,14 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
 
             # add a normal Image layer, the inserted event updates the dropdowns
             # the user still needs to choose which one is FLM and which one is TEM
+            add_start = perf_counter()
             viewer.add_image(
                 image,
                 name=path.name,
+            )
+            print(
+                f"napari add_image: "
+                f"{perf_counter() - add_start:.2f} s"
             )
     
     
