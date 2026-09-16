@@ -21,5 +21,7 @@ dependencies:
   - qtpy=2.4.*
   - pytest
   - pip
+  - tifffile
+  - imageio
   - pip:
       - mrcfile==1.5.4
