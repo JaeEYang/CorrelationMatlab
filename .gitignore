@@ -1,8 +1,5 @@
-
 # Python cache
 .idea/
-
-# Python-generated files
 __pycache__/
 *.pyc
 ._*
@@ -10,20 +7,30 @@ __pycache__/
 
 # Test tooling
 .pytest_cache/
-
 .pytest_tmp/
 
-# Large local microscope test data (kept outside regular Git)
-data/Testing_Data_01/Data/82map_2.st
 
-# Generated / scientific image files
+# ============================================================
+# LOCAL DATA
+# Keep data/ directory in repository, but ignore its contents
+# ============================================================
+
+data/*
+!data/.gitkeep
+
+
+# Scientific / microscope files anywhere else in the repository
 *.st
 *.tif
 *.tiff
+*.mdoc
+*.nav
+*.mrc
+*.rec
+
+# Generated images
 *.png
 *.jpg
 *.jpeg
 *.bmp
 *.webp
-
-data/
