@@ -11,15 +11,10 @@ __pycache__/
 
 
 # ============================================================
-# LOCAL DATA
-# Keep data/ directory in repository, but ignore its contents
+# SCIENTIFIC / MICROSCOPE DATA
 # ============================================================
 
-data/*
-!data/.gitkeep
-
-
-# Scientific / microscope files anywhere else in the repository
+# Scientific files are ignored by default elsewhere in the repository.
 *.st
 *.tif
 *.tiff
@@ -28,9 +23,18 @@ data/*
 *.mrc
 *.rec
 
-# Generated images
+# Generated images are ignored by default elsewhere.
 *.png
 *.jpg
 *.jpeg
 *.bmp
 *.webp
+
+# data/ itself is the curated reference-data location.
+# Direct files in data/ are intentionally allowed even if their
+# extensions are ignored above.
+!data/*
+
+# Any directory under data/ is considered a local experimental
+# dataset and must not be tracked.
+data/*/

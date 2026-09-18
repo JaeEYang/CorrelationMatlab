@@ -42,7 +42,6 @@ from napari.layers import Points, Image
 from time import perf_counter
 
 
-_MULTISCALE_PIXEL_THRESHOLD = 16_000_000
 
 def _read_image(path: Path) -> np.ndarray:
     '''Reads an image from a file path and returns it as a numpy array.
@@ -65,46 +64,6 @@ def _read_image(path: Path) -> np.ndarray:
     return np.asarray(
         io.imread(str(path))
     )
-    
-    
-def _build_multiscale_pyramid(image: np.ndarray) -> list[np.ndarray]:
-    """ Take one large 2D image and create progressively smaller display versions for napari
-    1x
-    2x  downsample
-    4x  downsample
-    8x  downsample
-    16x downsample
-    
-    return a list 
-    [
-    full_resolution,
-    half_resolution,
-    quarter_resolution,
-    ...
-    ]   
-    """
-
-    if image.ndim != 2:
-        raise ValueError(
-            "Multiscale display currently requires a 2D image"
-        )
-
-    pyramid = [image] # pyramid at zero is untouched scientific image
-
-    downsample_factor = 2
-
-    while True:
-        level = image[::downsample_factor, ::downsample_factor] # keeps every 2nd, 4th, 8th row and every 2nd, 4th, 8th column, giving an image half as tall and half as wide after every loop
-
-        pyramid.append(level)
-
-        if max(level.shape) <= 1024: # longest side is < 1024 break.
-            break
-
-        downsample_factor *= 2
-
-    return pyramid
-    
     
     # This function creates a magicgui container widget for the offline correlation tool.
     # This function is basically our widget factory, call this function and it constructs an object for you! that is awesome gui construction worker 
@@ -490,29 +449,11 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
 
             # add a normal Image layer, the inserted event updates the dropdowns
             # the user still needs to choose which one is FLM and which one is TEM
-            #large 2D? -> yes -> build lightweight pyramid -> viewer.add_image(... multiscale=True)
-            
             add_start = perf_counter()
-            
-            if (
-                image.ndim == 2
-                and image.size >= _MULTISCALE_PIXEL_THRESHOLD
-            ):
-                display_data = _build_multiscale_pyramid(
-                    image
-                )
-
-                viewer.add_image(
-                    display_data,
-                    name=path.name,
-                    multiscale=True,
-                )
-
-            else:
-                viewer.add_image(
-                    image,
-                    name=path.name,
-                )
+            viewer.add_image(
+                image,
+                name=path.name,
+            )
             print(
                 f"napari add_image: "
                 f"{perf_counter() - add_start:.2f} s"
@@ -573,14 +514,12 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
                 f"{role}: {error}"
             )
             return
-        modality = controller._get_modality(
-            role
-        )
+
         status.value = (
             f"{role}: "
             f"{layer.name} "
-            f"{tuple(modality.image.shape)} "
-            f"{modality.image.dtype}"
+            f"{tuple(layer.data.shape)}"
+            f"{layer.data.dtype}"
         )
 
         # only enable controls once assignment worked
@@ -699,14 +638,11 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
         # so the old landmark association no longer belongs to this source grid
         if grid_changed:
             image_layer = controller.get_modality_image_layer(role)
-            modality = controller._get_modality(
-                role
-            )
         
             if role == "FLM":
                 flm_status.value = (
                     f"FLM: {image_layer.name} "
-                    f"{tuple(modality.image.shape)}"
+                    f"{tuple(image_layer.data.shape)}"
                 )
 
                 flm_points_status.value = (
@@ -716,7 +652,7 @@ def make_offline_correlation_widget(viewer) -> QScrollArea:
             else:
                 tem_status.value = (
                     f"TEM: {image_layer.name} "
-                    f"{tuple(modality.image.shape)}"
+                    f"{tuple(image_layer.data.shape)}"
                 )
 
                 tem_points_status.value = (
@@ -1821,7 +1757,7 @@ IMAGE LOADING
 _read_image()
 
     file on disk
-        ↓
+        
     NumPy array
 
 The generic Load Images button only loads image data into napari.

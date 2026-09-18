@@ -43,6 +43,11 @@ In napari's **Plugins** menu, open one of the two Correlation 2D-3D widgets:
 Sample images, registration points, Navigator files, and reference outputs are
 available in [`data/`](./data/).
 
+Files stored directly in `data/` form a small curated reference dataset used
+for examples, regression checks, and comparison with the legacy MATLAB
+workflow. Large experimental datasets are stored in subdirectories of `data/`
+and are intentionally ignored by Git.
+
 ### Tests
 
 After installing the editable package with the `test` extra:
@@ -57,8 +62,9 @@ python -m pytest napari-offilinecorrelation-test/tests
   active napari plugin development.
 - **[`matlab/`](./matlab/)** — frozen MATLAB reference implementation used to
   define golden outputs for the Python port.
-- **[`data/`](./data/)** — sample inputs, Navigator files, and MATLAB reference
-  outputs.
+- **[`data/`](./data/)** — curated reference inputs and outputs. Large
+  experimental datasets stored in subdirectories are local-only and ignored
+  by Git.
 - **[`environment.yml`](./environment.yml)** — reproducible development
   environment.
 
